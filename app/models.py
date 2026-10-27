@@ -1,0 +1,159 @@
+"""Data model.
+
+Stock is never stored directly: it is the sum of dated stock movements for a
+product. Debts work the same way — a customer's balance is the sum of their
+debt entries (credit given is positive, repayments are negative).
+Money amounts are integers in the shop's currency (FCFA has no subunit).
+"""
+
+import enum
+from datetime import datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+    select,
+)
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
+
+from app.db import Base
+
+Quantity = Numeric(12, 3)
+
+
+def _enum(cls: type[enum.Enum]) -> Enum:
+    # Stored as VARCHAR + CHECK so adding a value doesn't need ALTER TYPE.
+    return Enum(cls, native_enum=False, length=20, values_callable=lambda e: [m.value for m in e])
+
+
+class Language(str, enum.Enum):
+    FR = "fr"
+    EN = "en"
+    PIDGIN = "pcm"
+
+
+class MovementKind(str, enum.Enum):
+    PURCHASE = "purchase"  # restock from a supplier
+    SALE = "sale"
+    ADJUSTMENT = "adjustment"  # manual correction or shelf-count reconciliation
+    LOSS = "loss"  # spoiled, broken, stolen
+
+
+class DebtKind(str, enum.Enum):
+    CREDIT = "credit"  # customer took goods on credit
+    REPAYMENT = "repayment"
+
+
+class Shop(Base):
+    __tablename__ = "shops"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    owner_phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    language: Mapped[Language] = mapped_column(_enum(Language), default=Language.FR)
+    currency: Mapped[str] = mapped_column(String(3), default="XAF")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    products: Mapped[list["Product"]] = relationship(back_populates="shop")
+    customers: Mapped[list["Customer"]] = relationship(back_populates="shop")
+
+
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("shop_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    unit: Mapped[str] = mapped_column(String(20), default="piece")
+    sale_price: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    shop: Mapped[Shop] = relationship(back_populates="products")
+    movements: Mapped[list["StockMovement"]] = relationship(back_populates="product")
+
+
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[MovementKind] = mapped_column(_enum(MovementKind))
+    # Signed: positive adds to stock, negative removes from it.
+    quantity: Mapped[Decimal] = mapped_column(Quantity)
+    unit_cost: Mapped[int | None] = mapped_column(BigInteger)
+    sale_id: Mapped[int | None] = mapped_column(ForeignKey("sales.id", ondelete="SET NULL"))
+    # WhatsApp message id that produced this movement, for traceability/idempotency.
+    source_message_id: Mapped[str | None] = mapped_column(String(128))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    product: Mapped[Product] = relationship(back_populates="movements")
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+    __table_args__ = (UniqueConstraint("shop_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    phone: Mapped[str | None] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    shop: Mapped[Shop] = relationship(back_populates="customers")
+    debts: Mapped[list["Debt"]] = relationship(back_populates="customer")
+
+
+class Sale(Base):
+    __tablename__ = "sales"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="RESTRICT"), index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"))
+    quantity: Mapped[Decimal] = mapped_column(Quantity)
+    unit_price: Mapped[int] = mapped_column(BigInteger)
+    total: Mapped[int] = mapped_column(BigInteger)
+    on_credit: Mapped[bool] = mapped_column(default=False)
+    source_message_id: Mapped[str | None] = mapped_column(String(128))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Debt(Base):
+    __tablename__ = "debts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[DebtKind] = mapped_column(_enum(DebtKind))
+    # Signed: positive for credit given, negative for repayment.
+    amount: Mapped[int] = mapped_column(BigInteger)
+    sale_id: Mapped[int | None] = mapped_column(ForeignKey("sales.id", ondelete="SET NULL"))
+    note: Mapped[str | None] = mapped_column(String(255))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    customer: Mapped[Customer] = relationship(back_populates="debts")
+
+
+def current_stock(session: Session, product_id: int, at: datetime | None = None) -> Decimal:
+    """Stock of a product, optionally as of a given time."""
+    query = select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
+        StockMovement.product_id == product_id
+    )
+    if at is not None:
+        query = query.where(StockMovement.occurred_at <= at)
+    return Decimal(session.scalar(query))
+
+
+def customer_balance(session: Session, customer_id: int) -> int:
+    """Amount the customer still owes the shop."""
+    query = select(func.coalesce(func.sum(Debt.amount), 0)).where(Debt.customer_id == customer_id)
+    return int(session.scalar(query))
