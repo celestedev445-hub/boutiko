@@ -1,10 +1,9 @@
-import logging
-
 from fastapi import FastAPI
 
+from app.logging_config import setup_logging
 from app.whatsapp.webhook import router as whatsapp_router
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 
 app = FastAPI(title="Boutiko", version="0.1.0")
 app.include_router(whatsapp_router)

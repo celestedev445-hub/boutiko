@@ -2,6 +2,8 @@ import hashlib
 import hmac
 import json
 
+import pytest
+
 from app.config import get_settings
 from tests.conftest import APP_SECRET, VERIFY_TOKEN
 
@@ -28,8 +30,8 @@ def _payload(message: dict) -> dict:
     }
 
 
-def _message(type_: str, **content) -> dict:
-    return {"from": "237690000000", "id": "wamid.TEST", "timestamp": "1761562800", "type": type_, **content}
+def _message(type_: str, id_: str = "wamid.TEST", **content) -> dict:
+    return {"from": "237690000000", "id": id_, "timestamp": "1761562800", "type": type_, **content}
 
 
 # --- GET verification ---
@@ -91,18 +93,38 @@ def test_unsupported_type_gets_help_message(client, sent):
     assert "Désolé" in sent[0][1]
 
 
-def test_status_update_without_messages_sends_nothing(client, sent):
+@pytest.mark.parametrize("status", ["sent", "delivered", "read"])
+def test_status_update_sends_nothing(client, sent, status):
     payload = _payload(_message("text", text={"body": "x"}))
     value = payload["entry"][0]["changes"][0]["value"]
     del value["messages"]
-    value["statuses"] = [{"id": "wamid.X", "status": "delivered"}]
+    value["statuses"] = [{"id": "wamid.X", "status": status, "recipient_id": "237690000000"}]
     assert client.post("/webhook", json=payload).status_code == 200
     assert sent == []
 
 
-def test_invalid_payload_is_rejected(client, sent):
-    assert client.post("/webhook", json={"hello": "world"}).status_code == 400
+def test_unexpected_payload_still_gets_200(client, sent):
+    assert client.post("/webhook", json={"hello": "world"}).status_code == 200
     assert sent == []
+
+
+def test_duplicate_message_is_answered_once(client, sent):
+    payload = _payload(_message("text", id_="wamid.DUP", text={"body": "bonjour"}))
+    assert client.post("/webhook", json=payload).status_code == 200
+    assert client.post("/webhook", json=payload).status_code == 200
+    assert sent == [("237690000000", "Echo: bonjour")]
+
+
+def test_different_messages_are_all_answered(client, sent):
+    client.post("/webhook", json=_payload(_message("text", id_="wamid.A", text={"body": "un"})))
+    client.post("/webhook", json=_payload(_message("text", id_="wamid.B", text={"body": "deux"})))
+    assert [body for _, body in sent] == ["Echo: un", "Echo: deux"]
+
+
+def test_signature_not_checked_without_secret(client, sent):
+    body = json.dumps(_payload(_message("text", text={"body": "hi"}))).encode()
+    assert _signed_post(client, body, "sha256=whatever").status_code == 200
+    assert len(sent) == 1
 
 
 def test_send_failure_still_returns_200(client, monkeypatch):
@@ -137,6 +159,6 @@ def test_bad_or_missing_signature_is_rejected(client, sent, monkeypatch):
     monkeypatch.setenv("WHATSAPP_APP_SECRET", APP_SECRET)
     get_settings.cache_clear()
     body = json.dumps(_payload(_message("text", text={"body": "hi"}))).encode()
-    assert _signed_post(client, body, "sha256=deadbeef").status_code == 401
-    assert _signed_post(client, body, None).status_code == 401
+    assert _signed_post(client, body, "sha256=deadbeef").status_code == 403
+    assert _signed_post(client, body, None).status_code == 403
     assert sent == []

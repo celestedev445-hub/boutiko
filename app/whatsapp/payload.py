@@ -30,9 +30,17 @@ class Message(_Model):
     image: Media | None = None
 
 
+class Status(_Model):
+    """Delivery receipt for a message we sent: sent, delivered, read or failed."""
+
+    id: str
+    status: str
+
+
 class Value(_Model):
     messaging_product: str | None = None
     messages: list[Message] = []
+    statuses: list[Status] = []
 
 
 class Change(_Model):
@@ -51,3 +59,6 @@ class WebhookPayload(_Model):
 
     def messages(self) -> list[Message]:
         return [m for e in self.entry for c in e.changes for m in c.value.messages]
+
+    def statuses(self) -> list[Status]:
+        return [s for e in self.entry for c in e.changes for s in c.value.statuses]

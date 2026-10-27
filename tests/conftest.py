@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
+from app.whatsapp.dedup import seen_messages
 
 VERIFY_TOKEN = "test-verify-token"
 APP_SECRET = "test-app-secret"
@@ -15,8 +16,10 @@ def settings(monkeypatch):
     monkeypatch.delenv("WHATSAPP_APP_SECRET", raising=False)
     monkeypatch.setenv("DATABASE_URL", "sqlite://")
     get_settings.cache_clear()
+    seen_messages.clear()
     yield get_settings()
     get_settings.cache_clear()
+    seen_messages.clear()
 
 
 @pytest.fixture

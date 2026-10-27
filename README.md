@@ -165,6 +165,49 @@ pytest
 
 The tests don't need a database, a WhatsApp account or an API key — outgoing WhatsApp calls are stubbed.
 
+## Run the WhatsApp echo locally
+
+The fastest way to see the whole loop (WhatsApp → webhook → reply) working on Windows. The bot answers every text with `Echo: <your text>`.
+
+**Prerequisites:** Docker Desktop running, and cloudflared (`winget install --id Cloudflare.cloudflared`, then open a new terminal).
+
+1. **Fill in `.env`** (copy it from `.env.example`). For the echo you need `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID`. `WHATSAPP_APP_SECRET` is optional: when set, every POST must carry a valid `X-Hub-Signature-256`, otherwise it gets a 403.
+
+2. **Start everything:**
+
+   ```powershell
+   .\scripts\dev.ps1
+   ```
+
+   The script runs `docker compose up -d --build`, waits for `/health`, starts a Cloudflare quick tunnel and prints:
+
+   ```
+   Callback URL : https://<random-words>.trycloudflare.com/webhook
+   ```
+
+   If port 8000 is already taken (some editors forward it), run `.\scripts\dev.ps1 -Port 8001`. If PowerShell blocks the script, run `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1`.
+
+3. **Configure the webhook in Meta.** In your app on [developers.facebook.com](https://developers.facebook.com/apps/): **WhatsApp → Configuration → Webhook → Edit**:
+   - Callback URL: the URL printed by the script, ending in `/webhook`
+   - Verify token: the value of `WHATSAPP_VERIFY_TOKEN` in your `.env`
+   - Click **Verify and save**.
+
+4. **Subscribe to `messages`.** Still under **Webhook fields**, click **Subscribe** next to `messages`.
+
+5. **Send a test message.** In **WhatsApp → API Setup**, make sure your own number is listed as a recipient of the test number. Then send a WhatsApp message to the test number. You should get `Echo: <your text>` back within a few seconds.
+
+Watch what happens with `docker compose logs -f api`:
+
+```
+INFO    app.whatsapp.webhook: Message received from ********1234: id=wamid.… type=text
+INFO    app.whatsapp.webhook: Reply sent to ********1234 (message wamid.…): 'Echo: bonjour'
+INFO    app.whatsapp.webhook: Status update(s): sent
+```
+
+Phone numbers are masked down to the last 4 digits, and tokens never appear in the logs (the verify token is redacted from access logs too). If the reply fails, the log shows the Graph API error code and message. The most common one is `code 190` (access token expired: temporary tokens last about 24 h, so generate a new one and restart with `docker compose up -d`).
+
+The quick-tunnel URL changes every time the script restarts, so update the callback URL in Meta when it does. Meta retries deliveries that aren't acknowledged; the webhook always answers 200 right away and ignores message ids it has already handled, so you won't get the same echo twice.
+
 ## Connecting the WhatsApp test number
 
 Meta must reach your webhook over public HTTPS. Expose your local port 8000 with a tunnel.
