@@ -5,9 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
-# ffmpeg converts WhatsApp voice notes (OGG/Opus) to WAV for transcription
+# ffmpeg converts WhatsApp voice notes (OGG/Opus) to WAV for transcription;
+# curl is used by the hosting health check (Coolify)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
