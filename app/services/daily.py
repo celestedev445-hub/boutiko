@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 
 from app import clock, db
 from app.config import get_settings
-from app.models import DailySummary, Language, Shop, SummaryChannel
+from app.languages import Language
+from app.models import DailySummary, Shop, SummaryChannel
 from app.services import ledger
 from app.services.normalize import normalize_command
 from app.services.summary import build_daily_summary, local_now
@@ -113,7 +114,8 @@ def manual_summary(session: Session, owner_phone: str, asked_in: Language | None
     shop.summary_skipped_day = None
     session.commit()
 
-    text = write_summary(build_daily_summary(session, shop, day), language)
+    name = shop.language_name if language == shop.language else None
+    text = write_summary(build_daily_summary(session, shop, day), language, name)
     record_summary(session, shop, day, SummaryChannel.MANUAL, now)
     logger.info("Shop %s: summary of %s sent on request", shop.id, day.isoformat())
     return text, language
@@ -175,7 +177,7 @@ def _send_if_due(shop_id: int, now: datetime) -> bool:
         claim = record_summary(session, shop, day, SummaryChannel.AUTO, now)
         if claim is None:
             return False
-        text = write_summary(build_daily_summary(session, shop, day), shop.language)
+        text = write_summary(build_daily_summary(session, shop, day), shop.language, shop.language_name)
         try:
             client.send_text(shop.owner_phone, text, phone_number_id=shop.phone_number_id)
         except Exception as exc:

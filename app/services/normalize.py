@@ -19,11 +19,14 @@ _FILLERS = {"merci", "please", "pls", "plz", "stp", "svp", "thanks", "thank", "y
 
 
 def normalize_command(text: str) -> str:
-    """Short command as plain words: "Résumé, stp !" -> "resume", "D'accord" -> "d accord"."""
+    """Short command as plain words: "Résumé, stp !" -> "resume", "D'accord" -> "d accord".
+
+    Letters of any script are kept ("ملخص", "摘要"), so translated keywords can be matched too.
+    """
     text = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in text if not unicodedata.combining(c)).lower()
     text = text.replace("'", " ").replace("\u2019", " ")
-    words = re.findall(r"[a-z0-9]+", text)
+    words = re.findall(r"[^\W_]+", text)
     while len(words) > 1 and words[-1] in _FILLERS:
         words.pop()
     return " ".join(words)

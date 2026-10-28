@@ -11,9 +11,17 @@ phrases = json.loads(PHRASES.read_text(encoding="utf-8"))
 
 
 def test_dataset_size_and_languages():
-    assert len(phrases) == 33
-    assert len({p["id"] for p in phrases}) == 33
-    assert Counter(p["language"] for p in phrases) == {"fr": 13, "en": 10, "pcm": 10}
+    assert len(phrases) == 48
+    assert len({p["id"] for p in phrases}) == 48
+    assert Counter(p["language"] for p in phrases) == {
+        "fr": 13, "en": 10, "pcm": 10, "es": 2, "pt": 2, "ar": 2, "sw": 2, "ha": 2, "ln": 2, "zh": 3,
+    }
+
+
+def test_other_languages_cover_sales_purchases_debts_and_stock():
+    others = [p for p in phrases if p["language"] not in ("fr", "en", "pcm")]
+    actions = {a["action"] for p in others for a in p["expected"]}
+    assert {"sale", "purchase", "credit_sale", "debt_payment", "stock_check", "set_stock"} <= actions
 
 
 def test_expected_actions_are_valid_extractions():

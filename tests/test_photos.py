@@ -171,7 +171,7 @@ def test_vision_request(setup):
     assert call["response_format"]["type"] == "json_schema"
     assert schema["strict"] is True
     assert schema["schema"] == strict_json_schema(VisionExtraction)
-    assert schema["schema"]["required"] == ["actions", "language", "image_kind", "needs_clarification"]
+    assert schema["schema"]["required"] == ["actions", "language", "language_name", "image_kind", "needs_clarification"]
     assert schema["schema"]["additionalProperties"] is False
     assert schema["schema"]["properties"]["image_kind"]["enum"] == ["invoice", "receipt", "product", "handwritten_note", "other"]
     text, image = call["messages"][1]["content"]

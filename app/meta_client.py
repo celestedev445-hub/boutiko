@@ -30,11 +30,12 @@ REASONING_EFFORT = "low"
 # Retried once: network errors (timeouts included) and 5xx.
 RETRYABLE_ERRORS = (openai.APIConnectionError, openai.InternalServerError)
 
-EXTRACTION_PROMPT = """You help small shopkeepers in Cameroon keep their books.
-The merchant writes in French, English or Cameroonian Pidgin, often mixing them,
-with local product names and abbreviations. Extract every operation in the
-message, in order. All amounts are in FCFA ("francs", "F", "frs", "k" = 1000
-only when the merchant writes it, e.g. "25k").
+EXTRACTION_PROMPT = """You help small shopkeepers keep their books, first in Cameroon, now anywhere.
+The merchant may write in ANY language: French, English, Cameroonian Pidgin,
+Spanish, Portuguese, Arabic, Swahili, Hausa, Lingala, Chinese..., often mixing
+several, with local product names and abbreviations. Extract every operation in
+the message, in order. Amounts are plain numbers in the local money ("francs",
+"F", "frs"; "k" = 1000 only when the merchant writes it, e.g. "25k").
 
 Actions:
 - sale: goods sold and paid now
@@ -54,9 +55,20 @@ whole line. Fill only the one the merchant actually says.
 
 The golden rule: never calculate, convert or guess a value. No multiplying, no
 dividing, no price from memory, no default quantity. If something is not said,
-leave the field null. Keep product and customer names as written.
+leave the field null. Keep product and customer names as written, in the
+merchant's language and script: never translate them.
 
-language: "fr", "en" or "pcm" (Pidgin) — the main language of the message.
+language: ISO 639 code of the main language of the message ("fr", "en", "pcm"
+for Cameroonian or Nigerian Pidgin, "es", "pt", "ar", "sw", "ha", "ln", "zh"...).
+language_name: the English name of that language ("Spanish").
+Pidgin vs English: words without plural "s" after a number ("2 crate beer",
+"3 packet biscuit"), "don", "dey", "wetin", "remain for shop", "e go" mean pcm.
+
+intent, only for a message that is not an operation (then actions is one
+unknown action); null otherwise:
+- greeting: the merchant just says hello
+- summary_request: asks for today's summary or report
+- confirm_yes / confirm_no: just answers yes / no (to "Shall I save it?")
 
 Examples (only the relevant fields shown; every other field is null):
 "vendu 3 savons à 250" -> fr; sale, product "savons", quantity 3, price 250
@@ -74,7 +86,12 @@ Examples (only the relevant fields shown; every other field is null):
 "I buy 5 packet sugar" -> pcm; purchase, product "sugar", quantity 5, unit "packet" (no price said: price and total_price null)
 "j'ai 20 savons en stock" -> fr; set_stock, product "savons", quantity 20
 "I get 12 tin milk for shop now" -> pcm; set_stock, product "milk", quantity 12, unit "tin"
-"bonjour" -> fr; one unknown action"""
+"vendí 4 refrescos a 300 cada uno" -> es (Spanish); sale, product "refrescos", quantity 4, price 300
+"nimenunua magunia 3 ya mchele" -> sw (Swahili); purchase, product "mchele", quantity 3, unit "magunia"
+"张三赊了两包糖，1000" -> zh (Chinese); credit_sale, product "糖", quantity 2, unit "包", total_price 1000, customer "张三"
+"bonjour" -> fr; one unknown action; intent greeting
+"¿cómo me fue hoy?" -> es; one unknown action; intent summary_request
+"ndiyo" -> sw; one unknown action; intent confirm_yes"""
 
 KNOWN_PRODUCTS_PROMPT = """Products already recorded in this shop. When the merchant means one of
 them, write its name exactly as below, even if they spell it differently:

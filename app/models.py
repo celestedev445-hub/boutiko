@@ -20,6 +20,8 @@ from sqlalchemy import (
     JSON,
     Numeric,
     String,
+    Text,
+    TypeDecorator,
     UniqueConstraint,
     false,
     func,
@@ -28,6 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.db import Base
+from app.languages import MAX_CODE_LENGTH, Language, as_language
 
 Quantity = Numeric(12, 3)
 
@@ -37,10 +40,17 @@ def _enum(cls: type[enum.Enum]) -> Enum:
     return Enum(cls, native_enum=False, length=20, values_callable=lambda e: [m.value for m in e])
 
 
-class Language(str, enum.Enum):
-    FR = "fr"
-    EN = "en"
-    PIDGIN = "pcm"
+class LanguageCode(TypeDecorator):
+    """A language code stored as VARCHAR and read back as a Language ("fr", "sw", "zh-hant")."""
+
+    impl = String(MAX_CODE_LENGTH)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return None if value is None else str(Language(value))
+
+    def process_result_value(self, value, dialect):
+        return None if value is None else as_language(value)
 
 
 class MovementKind(str, enum.Enum):
@@ -78,7 +88,9 @@ class Shop(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     owner_phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
-    language: Mapped[Language] = mapped_column(_enum(Language), default=Language.FR)
+    # Language of the merchant's latest message; language_name is its English name, for prompts.
+    language: Mapped[Language] = mapped_column(LanguageCode(), default=Language.FR)
+    language_name: Mapped[str | None] = mapped_column(String(64))
     currency: Mapped[str] = mapped_column(String(3), default="XAF")
     summary_hour: Mapped[int | None] = mapped_column(Integer)  # None: settings.summary_hour
     # WhatsApp only allows free-form messages within 24 h of the merchant's last message.
@@ -225,6 +237,19 @@ class DailySummary(Base):
     day: Mapped[date] = mapped_column(Date)  # the shop's local day
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     channel: Mapped[SummaryChannel] = mapped_column(_enum(SummaryChannel))
+
+
+class Translation(Base):
+    """A fixed reply translated from English by a Meta model, once per key and language."""
+
+    __tablename__ = "translations"
+    __table_args__ = (UniqueConstraint("key", "language", name="uq_translations_key_language"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(64))  # e.g. "reply.sale", "keyword.summary"
+    language: Mapped[str] = mapped_column(String(MAX_CODE_LENGTH))
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 def current_stock(session: Session, product_id: int, at: datetime | None = None) -> Decimal:

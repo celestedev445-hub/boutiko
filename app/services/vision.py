@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from app import meta_client
 from app.config import get_settings
-from app.models import Language
+from app.languages import Language, language_name
 from app.schemas import VisionExtraction, strict_json_schema
 
 logger = logging.getLogger(__name__)
@@ -22,10 +22,9 @@ SUPPORTED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 REASONING_EFFORT = "low"
 RETRYABLE_ERRORS = (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError)
-LANGUAGE_NAMES = {Language.FR: "French", Language.EN: "English", Language.PIDGIN: "Cameroonian Pidgin"}
 
-VISION_PROMPT = """You help small shopkeepers in Cameroon keep their books. The merchant
-sent a photo on WhatsApp, sometimes with a caption. Read it and return the
+VISION_PROMPT = """You help small shopkeepers keep their books. The merchant sent a photo on
+WhatsApp, sometimes with a caption, in any language. Read it and return the
 operations to record. All amounts are in FCFA.
 
 image_kind and what to extract:
@@ -52,7 +51,9 @@ price is unreadable, cut off or missing, leave it null and say which one in
 needs_clarification. needs_clarification is "" when there is nothing to ask.
 
 needs_clarification is written in the merchant's language. language is the
-language of the caption ("fr", "en" or "pcm"), or null without a caption."""
+ISO 639 code of the caption's language ("fr", "en", "pcm" for Pidgin, "es",
+"ar", "sw", "zh"...) and language_name its English name, both null without a
+caption. Keep product names as written or printed, never translated."""
 
 
 class VisionError(RuntimeError):
@@ -78,15 +79,21 @@ def vision_response_format() -> dict:
     }
 
 
-def _instruction(caption: str | None, language: Language) -> str:
-    lines = [f"The merchant usually writes in {LANGUAGE_NAMES[language]}."]
+def _instruction(caption: str | None, language: Language, name: str | None = None) -> str:
+    lines = [f"The merchant usually writes in {language_name(language, name)}."]
     lines.append(f"Caption: {caption}" if caption else "No caption.")
     return "\n".join(lines)
 
 
 def analyze_image(
-    image: bytes, mime_type: str, caption: str | None, language: Language, known_products: list[str] | None = None
+    image: bytes,
+    mime_type: str,
+    caption: str | None,
+    language: Language,
+    known_products: list[str] | None = None,
+    language_name: str | None = None,
 ) -> VisionExtraction:
+    """language_name: English name of the merchant's language (shops.language_name), if known."""
     model = get_settings().model_vision
     data_url = f"data:{mime_type};base64,{base64.b64encode(image).decode()}"
     kwargs = dict(
@@ -97,7 +104,7 @@ def analyze_image(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": _instruction(caption, language)},
+                    {"type": "text", "text": _instruction(caption, language, language_name)},
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             },

@@ -4,8 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import db, meta_client
+from app import db, languages, meta_client
 from app.config import Settings, get_settings
+from app.services import translations
 from app.whatsapp import router
 from app.whatsapp.dedup import seen_messages
 
@@ -26,6 +27,8 @@ def settings(monkeypatch):
     meta_client.get_client.cache_clear()
     get_settings.cache_clear()
     seen_messages.clear()
+    translations.forget_failures()
+    languages.forget_names()
     yield get_settings()
     get_settings.cache_clear()
     seen_messages.clear()

@@ -13,7 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import clock
-from app.models import Language, PendingAction, PendingKind, PendingStatus
+from app.languages import Language, as_language
+from app.models import PendingAction, PendingKind, PendingStatus
 from app.schemas import Extraction
 from app.services import ledger, products
 from app.services.products import ProductChoice
@@ -147,7 +148,7 @@ def _settle(session: Session, wa_id: str, extraction: Extraction, message_id: st
 
 def language_of(pending: PendingAction, default: Language) -> Language:
     language = pending.payload.get("language")
-    return Language(language) if language else default
+    return as_language(language, default) if language else default
 
 
 def confirm(session: Session, pending: PendingAction) -> ledger.LedgerResult:
@@ -173,7 +174,7 @@ def choose(session: Session, pending: PendingAction, option: str) -> ledger.Ledg
     index = choice_of(pending).action_index
     actions = list(extraction.actions)
     actions[index] = actions[index].model_copy(update={"product": option})
-    chosen = Extraction(actions=actions, language=extraction.language)
+    chosen = extraction.model_copy(update={"actions": actions})
     result = ledger.apply_extraction(session, wa_id, chosen, message_id)
     _settle(session, wa_id, chosen, message_id, result)
     return result

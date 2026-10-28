@@ -1,11 +1,17 @@
-"""Short WhatsApp confirmations, in the merchant's language (fr, en, pcm)."""
+"""Short WhatsApp confirmations, in the merchant's language.
+
+fr, en and pcm are written by hand below; any other language is translated
+once from the English text (app/services/translations.py). Numbers and plurals
+follow French rules in French and English rules everywhere else, except that
+no English "s" is added to words in other languages.
+"""
 
 from decimal import Decimal
 
-from app.models import Language
+from app.languages import Language
 from app.schemas import Action, ExtractedAction, Extraction
 from app.services.ledger import ActionResult, LedgerResult, LedgerWarning
-from app.services import products
+from app.services import products, translations
 from app.services.products import ProductChoice
 from app.services.normalize import is_generic_unit
 
@@ -45,9 +51,9 @@ TEXTS: dict[str, dict[Language, str]] = {
     },
     "or": {FR: "ou", EN: "or", PCM: "or"},
     "welcome": {
-        FR: "👋 {greeting} ! Envoie-moi tes ventes, achats ou dettes, en texte, en vocal ou en photo, par exemple « vendu 3 savons à 250 ». Tape RÉSUMÉ pour le bilan du jour.",
-        EN: "👋 {greeting}! Send me your sales, purchases or debts, by text, voice note or photo, for example \"sold 3 soaps at 250\". Type SUMMARY for today's summary.",
-        PCM: "👋 {greeting}! Send me your sales, wetin you buy or who dey owe, for text, voice or photo, like \"I sell 3 soap 250 each\". Type SUMMARY make you see how market go today.",
+        FR: "👋 {greeting} ! Envoie-moi tes ventes, achats ou dettes, en texte, en vocal ou en photo, par exemple « vendu 3 savons à 250 ». Tape {keyword} pour le bilan du jour.",
+        EN: "👋 {greeting}! Send me your sales, purchases or debts, by text, voice note or photo, for example \"sold 3 soaps at 250\". Type {keyword} for today's summary.",
+        PCM: "👋 {greeting}! Send me your sales, wetin you buy or who dey owe, for text, voice or photo, like \"I sell 3 soap 250 each\". Type {keyword} make you see how market go today.",
     },
     "purchase": {
         FR: "📦 {item} {added} au stock. Stock : {stock}.",
@@ -185,9 +191,9 @@ TEXTS: dict[str, dict[Language, str]] = {
         PCM: "Total: {total} (the ones wey no get price no dey inside)",
     },
     "summary_question": {
-        FR: "Je l'enregistre ? Réponds OUI ou NON",
-        EN: "Shall I save it? Reply YES or NO",
-        PCM: "Make I save am? Answer YES or NO",
+        FR: "Je l'enregistre ? Réponds {yes} ou {no}",
+        EN: "Shall I save it? Reply {yes} or {no}",
+        PCM: "Make I save am? Answer {yes} or {no}",
     },
     "cancelled": {
         FR: "❌ Annulé, je n'ai rien enregistré.",
@@ -224,7 +230,24 @@ TEXTS: dict[str, dict[Language, str]] = {
         EN: "I couldn't read your message, please try again in a moment.",
         PCM: "I no fit read your message, try again small time.",
     },
+    "unsupported": {
+        FR: "Désolé, je comprends le texte, les notes vocales et les photos.",
+        EN: "Sorry, I understand text, voice notes and photos.",
+        PCM: "Sorry, I sabi only text, voice note and photo.",
+    },
 }
+
+# Words the merchant types: shown in the messages and recognized when they come back.
+KEYWORDS: dict[str, dict[Language, str]] = {
+    "summary": {FR: "RÉSUMÉ", EN: "SUMMARY", PCM: "SUMMARY"},
+    "yes": {FR: "OUI", EN: "YES", PCM: "YES"},
+    "no": {FR: "NON", EN: "NO", PCM: "NO"},
+}
+
+
+def keyword(name: str, language: Language) -> str:
+    """"RÉSUMÉ", "SUMMARY", or the word translated once for another language ("RESUMEN")."""
+    return translations.localized(f"keyword.{name}", KEYWORDS[name], language, keyword=True)
 
 
 def format_amount(amount: int) -> str:
@@ -253,7 +276,8 @@ def _is_plural(quantity: Decimal | None, language: Language) -> bool:
 
 
 def _plural(word: str, quantity: Decimal | None, language: Language) -> str:
-    if language == PCM or not _is_plural(quantity, language):
+    # An English "s" only on French and English words; Pidgin and other languages keep the word as said.
+    if language not in (FR, EN) or not _is_plural(quantity, language):
         return word
     if word.lower() in _INVARIABLE_UNITS or word[-1:] in ("s", "x"):
         return word
@@ -272,7 +296,7 @@ def _item(result: ActionResult, language: Language) -> str:
     product = result.product or ""
     if not is_generic_unit(result.unit):
         unit = _plural(result.unit, result.quantity, language)
-        joiner = {FR: " de ", EN: " of ", PCM: " "}[language]
+        joiner = {FR: " de ", EN: " of "}.get(language, " ")
         if language == FR and product[:1].lower() in "aeiouhâéèêîôœ" and product:
             joiner = " d'"  # 3 bidons d'huile
         return f"{quantity} {unit}{joiner}{product}"
@@ -280,8 +304,13 @@ def _item(result: ActionResult, language: Language) -> str:
     return f"{quantity} {_plural(first, result.quantity, language)}{' ' + rest if rest else ''}"
 
 
+def _key_name(key) -> str:
+    return getattr(key, "value", key)
+
+
 def _t(key, language: Language, **values) -> str:
-    return TEXTS[key][language].format(**values)
+    """The text of `key` in the merchant's language, filled in after translation."""
+    return translations.localized(f"reply.{_key_name(key)}", TEXTS[key], language).format(**values)
 
 
 def _balance_line(result: ActionResult, language: Language) -> str:
@@ -429,7 +458,7 @@ def pending_summary(extraction: Extraction, language: Language, clarification: s
         lines.append(_t(key, language, total=format_amount(sum(amounts))))
     if clarification:
         lines.append(f"⚠️ {clarification.strip()}")
-    lines.append(_t("summary_question", language))
+    lines.append(_t("summary_question", language, yes=keyword("yes", language), no=keyword("no", language)))
     return "\n".join(lines)
 
 
@@ -469,4 +498,8 @@ def product_choice(choice: ProductChoice, language: Language) -> str:
 
 
 def welcome(language: Language, greeting: str) -> str:
-    return _t("welcome", language, greeting=greeting)
+    return _t("welcome", language, greeting=greeting, keyword=keyword("summary", language))
+
+
+def unsupported(language: Language) -> str:
+    return _t("unsupported", language)

@@ -10,10 +10,11 @@ import httpx
 from sqlalchemy import select
 
 from app import db, meta_client
+from app.languages import Language, as_language
 from app.logging_config import mask_phone
-from app.models import Language, PendingKind, Shop
+from app.models import PendingKind, Shop
 from app.schemas import Action, Extraction
-from app.services import audio, daily, greetings, ledger, pending, products, replies, transcribe, vision
+from app.services import audio, daily, greetings, ledger, pending, products, replies, transcribe, translations, vision
 from app.whatsapp import media
 from app.whatsapp.client import GraphAPIError
 from app.whatsapp.payload import Message
@@ -33,6 +34,37 @@ def _shop_language(owner_phone: str) -> Language:
         logger.exception("Could not look up the shop language")
         return Language.FR
     return language or Language.FR
+
+
+def _shop_language_name(owner_phone: str) -> str | None:
+    """English name of the shop's language (only stored for languages without hand-written texts)."""
+    try:
+        with db.SessionLocal() as session:
+            return session.scalar(select(Shop.language_name).where(Shop.owner_phone == owner_phone))
+    except Exception as exc:  # no traceback: SQL errors would print the phone number
+        logger.error("Could not look up the language name of %s: %s", mask_phone(owner_phone), type(exc).__name__)
+        return None
+
+
+def _note_language(owner_phone: str, extraction: Extraction) -> None:
+    """A message that records nothing still sets the shop's language (replies follow the latest one)."""
+    try:
+        with db.SessionLocal() as session:
+            shop = session.scalar(select(Shop).where(Shop.owner_phone == owner_phone))
+            if shop is not None:
+                ledger.note_language(shop, extraction)
+                session.commit()
+    except Exception as exc:
+        logger.error("Could not note the language of %s: %s", mask_phone(owner_phone), type(exc).__name__)
+
+
+def _keyword_decision(text: str) -> pending.Decision | None:
+    """YES / NO typed as the word shown in a translated question ("SÍ", "NDIYO")."""
+    if translations.keyword_language(text, "keyword.yes") is not None:
+        return pending.Decision.YES
+    if translations.keyword_language(text, "keyword.no") is not None:
+        return pending.Decision.NO
+    return None
 
 
 def _already_recorded(message_id: str) -> bool:
@@ -69,20 +101,23 @@ def _reply_to_result(result: ledger.LedgerResult, language: Language) -> str:
     return replies.confirmation(result)
 
 
-def _answer_pending(message: Message, text: str) -> tuple[str, Language] | None:
+def _answer_pending(
+    message: Message, text: str, decision: pending.Decision | None = None
+) -> tuple[str, Language] | None:
     """Answer the merchant's latest pending action, if the message answers it.
 
     YES / NO for a photo, or the product picked for "Quel savon : Azur ou Palmida ?".
+    decision: YES / NO already understood by the extraction model (any language).
     None if there is nothing pending (or it expired) or the message is something else.
     """
     sender = mask_phone(message.sender)
-    decision = pending.parse_decision(text)
     try:
         with db.SessionLocal() as session:
             waiting = pending.latest_active(session, message.sender)
             if waiting is None:
                 session.commit()  # keep the expired statuses
                 return None
+            decision = decision or pending.parse_decision(text) or _keyword_decision(text)
             language = pending.language_of(waiting, session.get(Shop, waiting.shop_id).language)
             pending_id = waiting.id
             if waiting.kind == PendingKind.CHOOSE_PRODUCT:
@@ -122,11 +157,22 @@ def _welcome(message: Message, text: str) -> tuple[str, Language] | None:
 
 
 def _summary_command(message: Message, text: str) -> tuple[str, Language] | None:
-    """"résumé", "how market go today", "résumé à 21h"... None if the text is none of them."""
+    """"résumé", "how market go today", "résumé à 21h", a translated keyword ("RESUMEN")...
+
+    None if the text is none of them.
+    """
     hour_command = daily.parse_summary_hour(text)
     requested = daily.parse_summary_request(text)
     if hour_command is None and requested is False:
+        requested = translations.keyword_language(text, "keyword.summary") or False
+    if hour_command is None and requested is False:
         return None
+    return _summary_reply(message, hour_command, requested)
+
+
+def _summary_reply(
+    message: Message, hour_command: tuple[int, Language | None] | None, requested: Language | None
+) -> tuple[str, Language]:
     try:
         with db.SessionLocal() as session:
             if hour_command is not None:
@@ -160,10 +206,33 @@ def _process_text(message: Message, text: str, transcript: str | None = None) ->
         return _with_heard(replies.apology(language), transcript, language)
 
     logger.info(
-        "Extracted %d action(s) from message %s: %s",
+        "Extracted %d action(s) from message %s: %s%s",
         len(extraction.actions), message.id, ", ".join(a.action.value for a in extraction.actions) or "none",
+        f" (intent {extraction.intent})" if extraction.intent else "",
     )
+    answer = _answer_intent(message, extraction)
+    if answer is not None:
+        reply, language = answer
+        return _with_heard(reply, transcript, language)
     return _record(message, extraction, transcript)
+
+
+def _answer_intent(message: Message, extraction: Extraction) -> tuple[str, Language] | None:
+    """A greeting, a summary request or a YES / NO the keyword lists missed, in any language.
+
+    Only when the message records nothing: "hola, vendí 3 jabones" is a sale.
+    None when there is no such intent (or nothing pending to say YES / NO to).
+    """
+    if extraction.intent is None or any(a.action != Action.UNKNOWN for a in extraction.actions):
+        return None
+    _note_language(message.sender, extraction)
+    language = as_language(extraction.language, _shop_language(message.sender))
+    if extraction.intent == "greeting":
+        return replies.welcome(language, greetings.greeting(language)), language
+    if extraction.intent == "summary_request":
+        return _summary_reply(message, None, language)
+    decision = pending.Decision.YES if extraction.intent == "confirm_yes" else pending.Decision.NO
+    return _answer_pending(message, "", decision)
 
 
 def _record(message: Message, extraction: Extraction, transcript: str | None = None) -> str | None:
@@ -177,7 +246,7 @@ def _record(message: Message, extraction: Extraction, transcript: str | None = N
                 logger.info("Message %s: product to choose among %d", message.id, len(result.choice.options))
     except Exception:
         logger.exception("Could not record message %s from %s", message.id, sender)
-        language = Language(extraction.language) if extraction.language else Language.FR
+        language = as_language(extraction.language)
         return _with_heard(replies.apology(language), transcript, language)
 
     if result.duplicate:
@@ -260,7 +329,8 @@ def handle_image(message: Message) -> str | None:
 
     try:
         reading = vision.analyze_image(
-            data, mime_type, message.image.caption, language, known_products=_known_products(message.sender)
+            data, mime_type, message.image.caption, language,
+            known_products=_known_products(message.sender), language_name=_shop_language_name(message.sender),
         )
     except vision.VisionError as exc:
         logger.error("Vision failed for photo %s from %s: %s", message.id, sender, exc)
@@ -274,9 +344,9 @@ def handle_image(message: Message) -> str | None:
         ", needs clarification" if reading.needs_clarification.strip() else "",
     )
     if reading.language:
-        language = Language(reading.language)
+        language = as_language(reading.language, language)
     actions = [a for a in reading.actions if a.action != Action.UNKNOWN]
-    extraction = Extraction(actions=actions, language=reading.language)
+    extraction = Extraction(actions=actions, language=reading.language, language_name=reading.language_name)
 
     if all(a.action in READ_ONLY_ACTIONS for a in actions):
         if actions:  # e.g. a product photo captioned "il me reste combien ?"
@@ -298,7 +368,7 @@ def handle_image(message: Message) -> str | None:
 
 
 def handle_unsupported(message: Message) -> str:
-    return "Désolé, je comprends le texte, les notes vocales et les photos."
+    return replies.unsupported(_shop_language(message.sender))
 
 
 HANDLERS: dict[str, Callable[[Message], str | None]] = {

@@ -14,7 +14,7 @@ What gets lost: stock-outs nobody saw coming, profit that can't be measured, and
 
 - Owners of small shops, kiosks and market stalls in Cameroon, often running the business alone.
 - Already on WhatsApp all day — no new app to install, no account to create.
-- Speak French, English or Cameroonian Pidgin, and often switch between them mid-sentence.
+- Speak French, English or Cameroonian Pidgin, and often switch between them mid-sentence — and Boutiko answers in any other language too (see [Languages](#languages)).
 
 ## What it does
 
@@ -27,7 +27,7 @@ The shopkeeper sends whatever is easiest:
 | Invoice photo | Supplier's invoice or delivery note | Reads each line, asks "save it?", records the restock on YES |
 | Product photo | Photo of a soap, captioned *vendu 3 à 500* | Proposes the sale, records it on YES |
 
-Every evening the owner gets a short summary — sales, best sellers, low stock, who owes what — in French, English or Pidgin.
+Every evening the owner gets a short summary — sales, best sellers, low stock, who owes what — in their language.
 
 ## Architecture
 
@@ -92,7 +92,7 @@ All calls go through the Meta Model API with an OpenAI-compatible client (`base_
 | `muse-spark-1.2` (`MODEL_ASR_FALLBACK`) | Fallback transcription, chat completion with an audio input |
 | `sam-3.1` | Planned: segmenting and counting products on a shelf photo |
 
-The extraction output is validated against a Pydantic schema ([`app/schemas.py`](app/schemas.py)): a list of actions, each with `action`, `product`, `quantity`, `unit`, `price` (unit price), `total_price` (line total) and `customer`, plus the detected `language`.
+The extraction output is validated against a Pydantic schema ([`app/schemas.py`](app/schemas.py)): a list of actions, each with `action`, `product`, `quantity`, `unit`, `price` (unit price), `total_price` (line total) and `customer`, plus the detected `language` (a free ISO 639 code), its English `language_name`, and an `intent` for messages that aren't operations.
 
 ## Text pipeline
 
@@ -119,7 +119,7 @@ sequenceDiagram
    - prices: a stated **total** wins (unit price = total ÷ quantity, rounded); otherwise **unit price × quantity**; otherwise the product's last known sale price; otherwise the sale is still recorded and flagged *missing price*. A stated sale price becomes the product's current price;
    - a message id is applied only once (`processed_messages` table), even after a restart;
    - a followed stock may go negative: it's recorded, and the merchant is told kindly.
-3. **Reply** ([`app/services/replies.py`](app/services/replies.py)). One short line per action, in the language of the message (`fr`, `en`, `pcm`), amounts written as `25 000 FCFA`:
+3. **Reply** ([`app/services/replies.py`](app/services/replies.py)). One short line per action, in the language of the message (hand-written in `fr`, `en`, `pcm`, translated once for any other language, see [Languages](#languages)), amounts written as `25 000 FCFA`:
 
    ```
    ✅ 3 sacs de riz vendus, 25 000 FCFA. Reste : 12.
@@ -131,15 +131,16 @@ sequenceDiagram
 
 ### Evaluating the extraction
 
-[`tests/data/phrases.json`](tests/data/phrases.json) holds 33 realistic shop messages (13 French, 10 English, 10 Pidgin: unit prices, totals, credit, repayments, stock counts, several actions in one message) with the expected extraction. [`scripts/eval_extraction.py`](scripts/eval_extraction.py) sends each one to the real API and prints OK/KO per phrase and the overall score:
+[`tests/data/phrases.json`](tests/data/phrases.json) holds 48 realistic shop messages (13 French, 10 English, 10 Pidgin, and 15 in Spanish, Portuguese, Arabic, Swahili, Hausa, Lingala and Chinese: unit prices, totals, credit, repayments, stock counts, several actions in one message) with the expected extraction. [`scripts/eval_extraction.py`](scripts/eval_extraction.py) sends each one to the real API and prints OK/KO per phrase and the overall score:
 
 ```bash
 python scripts/eval_extraction.py              # all 33 phrases
 python scripts/eval_extraction.py --lang pcm   # only Pidgin
+python scripts/eval_extraction.py --lang sw --lang zh   # Swahili and Chinese
 python scripts/eval_extraction.py --id 10 -v   # one phrase, with the model output
 ```
 
-It reads `MODEL_API_KEY` from `.env`, makes one API call per phrase, and is **not** run by `pytest` (pytest only checks the dataset and the scorer). Product and customer names match when one normalized name contains the other; units are shown but not scored; language detection is scored separately.
+It reads `MODEL_API_KEY` from `.env`, makes one API call per phrase, and is **not** run by `pytest` (pytest only checks the dataset and the scorer). Product and customer names match when one normalized name contains the other; units are shown but not scored; language detection is scored separately, and both scores are also given per language.
 
 ### Products and stock
 
@@ -298,6 +299,16 @@ python scripts/demo_summary.py 237690001234 --send           # send it and recor
 docker compose exec api python scripts/demo_summary.py 237690001234   # with Docker
 ```
 
+## Languages
+
+Boutiko answers in the language the merchant writes in — any language, not only French, English and Pidgin: Spanish, Portuguese, Arabic, Swahili, Hausa, Lingala, Chinese… It is meant for shopkeepers anywhere who can't afford a management app or aren't at ease with computers. Only Meta models are used, through the Meta Model API: no third-party translation service.
+
+- **Understanding.** The extraction prompt says the merchant may write in any language or mix several, and never to translate product or customer names. The model returns `language`, a free ISO 639 / BCP-47 code (`fr`, `en`, `pcm`, `es`, `sw`, `zh-hant`…), and `language_name`, its English name (*Swahili*). The shop's language (`shops.language`, a `VARCHAR(16)` since migration 0007, plus `shops.language_name`) follows the merchant's latest message. Voice notes: `muse-voice-transcribe` gets no language and detects it; the `muse-spark-1.2` fallback is told to keep the spoken language. Photos and the evening summary get the language's name in their prompt.
+- **Fixed replies.** French, English and Pidgin are **written by hand** and never go through a model. For any other language, the **English** text of each reply is translated **once** per (key, language) by `MODEL_TEXT` (`muse-spark-1.3-contributor`) and stored in the `translations` table; the next messages read it from the database, without calling the model ([`app/services/translations.py`](app/services/translations.py)).
+- **Amounts are never translated.** Only templates go to the model, like `✅ {item} sold, {total}.`: amounts, quantities, product and customer names are inserted afterwards through the `{placeholders}`. A translation is kept only if it has exactly the same placeholders, emojis and numbers as the English (and no stray braces or extra lines); otherwise it is rejected and the English text is used. If the model can't be reached, Boutiko answers in English and records the message anyway; a failed translation is retried a few hours later, not on every message.
+- **Numbers and plurals.** French rules in French (`1,5`, *3 sacs*), English rules everywhere else (`1.5`), except that no English *s* is ever added to a word in another language (*3 saco*, *3 袋*).
+- **Keywords.** The usual lists still work (*résumé*, *summary*, *how market go today*, *oui*, *yes*, *na so*…). When a message matches none of them, the extraction model says what it means: `intent` is `greeting`, `summary_request`, `confirm_yes`, `confirm_no` or null, used only when the message records nothing. The welcome message, *Type SUMMARY* and *Reply YES or NO* show the word in the merchant's language (*RESUMEN*, *NDIO*, *ملخص*), translated once like the other texts, and that word is then recognized without calling the model.
+
 ## Landing page
 
 A public presentation page is served at `/` (French by default, an FR / EN switch at the top, the choice kept in `localStorage`). It is a single static page — `app/static/index.html` and `app/static/style.css`, no framework, no build, nothing loaded from another site.
@@ -315,9 +326,11 @@ app/
   schemas.py         Pydantic extraction schema + strict JSON schema
   meta_client.py     Meta Model API client and extraction prompt
   logging_config.py  log format, phone masking, token redaction
+  languages.py       free language codes and their names for prompts
   services/
     ledger.py        extraction -> sales, stock movements, debts
-    replies.py       confirmations in fr / en / pcm
+    replies.py       confirmations, hand-written in fr / en / pcm
+    translations.py  other languages: translated once by a Meta model, checked, cached
     normalize.py     product and customer name keys
     products.py      product matching, "which one?" questions, duplicates
     greetings.py     greeting by the time of day, welcome messages
@@ -496,7 +509,7 @@ curl "https://<your-tunnel-host>/webhook?hub.mode=subscribe&hub.verify_token=<yo
 
 ## Status
 
-Working today: **text messages, voice notes and photos** (Meta speech-to-text with fallback, Meta vision with confirmation before saving, extraction, ledger, replies in French, English and Pidgin), the **evening summary** (figures from the ledger, written by a Meta model with an amount guard, sent within WhatsApp's 24 h window), webhook verification and signatures, deduplication, data model and migrations. Next: shelf counting with SAM, and letting the merchant name their shop. Open questions about the Meta Model API (SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
+Working today: **text messages, voice notes and photos** (Meta speech-to-text with fallback, Meta vision with confirmation before saving, extraction, ledger, replies in any language: hand-written in French, English and Pidgin, translated once and cached for the others), the **evening summary** (figures from the ledger, written by a Meta model with an amount guard, sent within WhatsApp's 24 h window), webhook verification and signatures, deduplication, data model and migrations. Next: shelf counting with SAM, and letting the merchant name their shop. Open questions about the Meta Model API (SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
 
 ## Security
 

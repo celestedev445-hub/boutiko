@@ -11,6 +11,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema, field_validator
 
+from app.languages import normalize_code
+
 
 class Action(str, Enum):
     SALE = "sale"
@@ -54,12 +56,38 @@ class ExtractedAction(BaseModel):
         return value or None
 
 
-class Extraction(BaseModel):
+# What a message means when it is not an operation; None for operations.
+Intent = Literal["greeting", "summary_request", "confirm_yes", "confirm_no"]
+
+
+class _Reading(BaseModel):
+    """What the model read in a message or on a photo: the actions and the language."""
+
     model_config = ConfigDict(extra="forbid")
 
     actions: list[ExtractedAction] = Field(default_factory=list)
-    language: Literal["fr", "en", "pcm"] | None = Field(
-        default=None, description="Language of the message: fr, en or pcm (Cameroonian Pidgin)"
+    language: str | None = Field(
+        default=None,
+        description="ISO 639 code of the main language of the message: fr, en, pcm (Pidgin), es, pt, ar, sw, ha, ln, zh...",
+    )
+    language_name: str | None = Field(default=None, description="English name of that language, e.g. Spanish")
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def _language_code(cls, value: object) -> str | None:
+        """A normalized code ("ES" -> "es"); anything that isn't a language code becomes None."""
+        return normalize_code(value)
+
+    @field_validator("language_name")
+    @classmethod
+    def _strip_name(cls, value: str | None) -> str | None:
+        return (value.strip()[:64] or None) if value else None
+
+
+class Extraction(_Reading):
+    intent: Intent | None = Field(
+        default=None,
+        description="greeting, summary_request, confirm_yes or confirm_no when the message is not an operation; null otherwise",
     )
 
 
@@ -71,7 +99,7 @@ class ImageKind(str, Enum):
     OTHER = "other"
 
 
-class VisionExtraction(Extraction):
+class VisionExtraction(_Reading):
     """What the model reads on a photo: the same actions as text, plus what the photo is."""
 
     image_kind: ImageKind = Field(description="What the photo shows")
@@ -81,7 +109,7 @@ class VisionExtraction(Extraction):
     )
 
     def as_extraction(self) -> Extraction:
-        return Extraction(actions=self.actions, language=self.language)
+        return Extraction(actions=self.actions, language=self.language, language_name=self.language_name)
 
 
 # Keywords the strict structured-output mode doesn't need; Pydantic enforces the constraints anyway.

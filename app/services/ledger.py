@@ -19,7 +19,6 @@ from app.models import (
     Customer,
     Debt,
     DebtKind,
-    Language,
     MovementKind,
     ProcessedMessage,
     Product,
@@ -29,6 +28,7 @@ from app.models import (
     current_stock,
     customer_balance,
 )
+from app.languages import Language, as_language, remember_name
 from app.schemas import Action, ExtractedAction, Extraction
 from app.services import products
 from app.services.normalize import is_generic_unit, normalize_name, product_key
@@ -82,8 +82,7 @@ def apply_extraction(session: Session, owner_phone: str, extraction: Extraction,
     """
     try:
         shop = get_or_create_shop(session, owner_phone, extraction.language)
-        if extraction.language:
-            shop.language = Language(extraction.language)  # replies and summaries follow the latest language
+        note_language(shop, extraction)
         language = shop.language
         if _already_processed(session, message_id):
             return LedgerResult(shop_id=shop.id, language=language, duplicate=True)
@@ -128,12 +127,23 @@ def _already_processed(session: Session, message_id: str) -> bool:
     return session.scalar(select(ProcessedMessage.id).where(ProcessedMessage.message_id == message_id)) is not None
 
 
+def note_language(shop: Shop, extraction: Extraction) -> None:
+    """Replies and summaries follow the language of the merchant's latest message (any language)."""
+    if not extraction.language:
+        return
+    language = as_language(extraction.language)
+    if language != shop.language or extraction.language_name:
+        shop.language_name = None if language.hand_written else extraction.language_name
+    shop.language = language
+    remember_name(language, extraction.language_name)
+
+
 def get_or_create_shop(session: Session, owner_phone: str, language: str | None) -> Shop:
     """The merchant's shop, created on their first message."""
     shop = session.scalar(select(Shop).where(Shop.owner_phone == owner_phone))
     if shop is None:
         # Provisional name until the merchant tells us the shop's name.
-        shop = Shop(name=owner_phone, owner_phone=owner_phone, language=Language(language or "fr"))
+        shop = Shop(name=owner_phone, owner_phone=owner_phone, language=as_language(language))
         session.add(shop)
         session.flush()
     return shop

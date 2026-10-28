@@ -3,7 +3,8 @@
 import enum
 from datetime import datetime
 
-from app.models import Language
+from app.languages import Language
+from app.services import translations
 from app.services.normalize import normalize_command
 from app.services.summary import local_now
 
@@ -14,10 +15,11 @@ class Period(str, enum.Enum):
     EVENING = "evening"  # from 18:00
 
 
+# Hand-written in fr, en, pcm; translated once for any other language.
 _GREETINGS = {
-    Language.FR: {Period.MORNING: "Bonjour", Period.AFTERNOON: "Bon après-midi", Period.EVENING: "Bonsoir"},
-    Language.EN: {Period.MORNING: "Good morning", Period.AFTERNOON: "Good afternoon", Period.EVENING: "Good evening"},
-    Language.PIDGIN: {Period.MORNING: "Good morning", Period.AFTERNOON: "Good afternoon", Period.EVENING: "Good evening"},
+    Period.MORNING: {Language.FR: "Bonjour", Language.EN: "Good morning", Language.PIDGIN: "Good morning"},
+    Period.AFTERNOON: {Language.FR: "Bon après-midi", Language.EN: "Good afternoon", Language.PIDGIN: "Good afternoon"},
+    Period.EVENING: {Language.FR: "Bonsoir", Language.EN: "Good evening", Language.PIDGIN: "Good evening"},
 }
 EMOJI = {Period.MORNING: "☀️", Period.AFTERNOON: "🌤️", Period.EVENING: "🌙"}
 
@@ -40,17 +42,22 @@ def period(now: datetime | None = None) -> Period:
     return Period.EVENING
 
 
+def _greeting_for(at: Period, language: Language) -> str:
+    return translations.localized(f"greeting.{at.value}", _GREETINGS[at], language)
+
+
 def greeting(language: Language, now: datetime | None = None) -> str:
-    return _GREETINGS[language][period(now)]
+    return _greeting_for(period(now), language)
 
 
 def other_greetings(language: Language, now: datetime | None = None) -> list[str]:
     """Greetings that would be wrong right now ("Bonjour" at 20:00)."""
     current = period(now)
-    wrong = {text for p, text in _GREETINGS[language].items() if p != current}
+    right = _greeting_for(current, language)
+    wrong = {_greeting_for(p, language) for p in Period if p != current}
     if language == Language.FR:
-        wrong |= {"Good morning", "Good afternoon", "Good evening"} - {_GREETINGS[language][current]}
-    return sorted(wrong)
+        wrong |= {_GREETINGS[p][Language.EN] for p in Period}
+    return sorted(wrong - {right})
 
 
 def parse_greeting(text: str) -> Language | None | bool:

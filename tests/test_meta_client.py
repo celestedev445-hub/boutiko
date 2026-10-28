@@ -86,9 +86,12 @@ def test_strict_schema_optional_fields_are_nullable():
     assert action["quantity"]["type"] == ["number", "null"]
     assert action["price"]["type"] == ["integer", "null"]
     assert action["total_price"]["type"] == ["integer", "null"]
-    language = strict_json_schema(Extraction)["properties"]["language"]
-    assert language["type"] == ["string", "null"]
-    assert language["enum"] == ["fr", "en", "pcm", None]
+    properties = strict_json_schema(Extraction)["properties"]
+    # Any language: a free code, no closed list.
+    assert properties["language"]["type"] == ["string", "null"]
+    assert "enum" not in properties["language"]
+    assert properties["language_name"]["type"] == ["string", "null"]
+    assert properties["intent"]["enum"] == ["greeting", "summary_request", "confirm_yes", "confirm_no", None]
 
 
 # --- request ---

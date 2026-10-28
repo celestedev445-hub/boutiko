@@ -5,8 +5,9 @@ compares the result with the expected actions. Not run by pytest: it needs
 MODEL_API_KEY (read from .env or the environment) and makes one API call per
 phrase.
 
-    python scripts/eval_extraction.py              # all 33 phrases
+    python scripts/eval_extraction.py              # all 48 phrases
     python scripts/eval_extraction.py --lang pcm   # only Pidgin
+    python scripts/eval_extraction.py --lang sw --lang zh   # Swahili and Chinese
     python scripts/eval_extraction.py --id 10 -v   # one phrase, show the model output
 
 Scoring, per phrase (OK only if every action matches, in order):
@@ -14,7 +15,8 @@ Scoring, per phrase (OK only if every action matches, in order):
   with quantity 1, price and total_price are interchangeable
 - product and customer: same normalized name, or one contained in the other
 - unit is shown but not scored (sac / bag / bags are all fine)
-Language detection is scored separately.
+Language detection is scored separately (the ISO 639 code), and both scores
+are given per language: fr, en, pcm, then es, pt, ar, sw, ha, ln, zh.
 """
 
 import argparse
@@ -22,6 +24,7 @@ import json
 import os
 import sys
 import time
+from collections import defaultdict
 from decimal import Decimal
 from pathlib import Path
 
@@ -81,7 +84,7 @@ def _short(text: str, width: int) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--lang", choices=("fr", "en", "pcm"), help="only phrases in this language")
+    parser.add_argument("--lang", action="append", help="only phrases in this language code (repeatable)")
     parser.add_argument("--id", type=int, action="append", help="only this phrase id (repeatable)")
     parser.add_argument("-v", "--verbose", action="store_true", help="print the model output for each phrase")
     args = parser.parse_args()
@@ -93,7 +96,7 @@ def main() -> int:
 
     phrases = json.loads(PHRASES.read_text(encoding="utf-8"))
     if args.lang:
-        phrases = [p for p in phrases if p["language"] == args.lang]
+        phrases = [p for p in phrases if p["language"] in args.lang]
     if args.id:
         phrases = [p for p in phrases if p["id"] in args.id]
 
@@ -102,7 +105,9 @@ def main() -> int:
     print("-" * 120)
 
     ok = lang_ok = 0
+    by_language: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])  # actions ok, language ok, total
     for phrase in phrases:
+        by_language[phrase["language"]][2] += 1
         start = time.monotonic()
         try:
             extraction = meta_client.extract_from_text(phrase["text"])
@@ -118,6 +123,8 @@ def main() -> int:
         language_matches = extraction.language == phrase["language"]
         ok += not diffs
         lang_ok += language_matches
+        by_language[phrase["language"]][0] += not diffs
+        by_language[phrase["language"]][1] += language_matches
         print(f"{phrase['id']:>3}  {phrase['language']:<4} {'OK' if not diffs else 'KO':<4} "
               f"{'ok' if language_matches else str(extraction.language):<6} {elapsed:>4.1f}s  "
               f"{_short(phrase['text'], 58):<58} {'; '.join(diffs)}")
@@ -130,6 +137,10 @@ def main() -> int:
         print("-" * 120)
         print(f"Actions : {ok}/{total} ({ok / total:.0%})")
         print(f"Language: {lang_ok}/{total} ({lang_ok / total:.0%})")
+        print()
+        print(f"{'lang':<5} {'actions':>8} {'language':>9}")
+        for language, (actions_ok, language_ok, count) in by_language.items():
+            print(f"{language:<5} {f'{actions_ok}/{count}':>8} {f'{language_ok}/{count}':>9}")
     return 0 if ok == total else 1
 
 

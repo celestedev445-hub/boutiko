@@ -25,8 +25,9 @@ ASR_PATH = "/asr/transcribe"
 TIMEOUT_SECONDS = 60
 FALLBACK_MAX_TOKENS = 4000
 FALLBACK_PROMPT = (
-    "Transcribe this audio exactly as spoken. It may be French, English or Cameroonian Pidgin, "
-    "about shop sales, purchases, stock and debts in FCFA. Return only the transcript."
+    "Transcribe this audio exactly as spoken. It may be in any language, sometimes several mixed: "
+    "keep the language it is spoken in, never translate. It is about shop sales, purchases, stock "
+    "and debts. Return only the transcript."
 )
 RETRYABLE_STATUS = {429} | set(range(500, 600))
 RETRYABLE_OPENAI_ERRORS = (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError)
@@ -64,6 +65,7 @@ def transcribe_with_asr(wav: bytes) -> Transcription:
     if not settings.model_api_key:
         raise TranscriptionError("MODEL_API_KEY is not set")
     url = settings.model_api_base_url.rstrip("/") + ASR_PATH
+    # No language in the request: the model detects it, so any language can be transcribed.
     request = {"model": settings.model_asr, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK"}
     files = {
         "request": (None, json.dumps(request), "application/json"),

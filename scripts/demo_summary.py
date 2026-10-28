@@ -28,7 +28,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("wa_id", help="the merchant's WhatsApp number, e.g. 237690001234")
     parser.add_argument("--day", type=date.fromisoformat, help="local day, YYYY-MM-DD (default: today)")
-    parser.add_argument("--lang", choices=("fr", "en", "pcm"), help="language (default: the shop's)")
+    parser.add_argument("--lang", help="language code, e.g. fr, en, pcm, es, sw (default: the shop's)")
     parser.add_argument("--no-model", action="store_true", help="use the template, don't call the model")
     parser.add_argument("--send", action="store_true", help="send it on WhatsApp and record it")
     args = parser.parse_args()
@@ -63,7 +63,8 @@ def main() -> int:
               f"out: {[s.name for s in figures.out_of_stock]}")
         print()
 
-        text = template(figures, language) if args.no_model else write_summary(figures, language)
+        name = shop.language_name if language == shop.language else None
+        text = template(figures, language) if args.no_model else write_summary(figures, language, name)
         source = "template" if args.no_model or text == template(figures, language) else "model"
         print(f"--- message ({source}, {len(text.splitlines())} lines) ---")
         print(text)

@@ -12,10 +12,10 @@ import openai
 
 from app import meta_client
 from app.config import get_settings
-from app.models import Language
-from app.services import greetings
+from app.languages import Language, as_language, language_name
+from app.services import greetings, translations
 from app.services.greetings import Period
-from app.services.replies import format_amount, format_quantity, quantity_with_unit
+from app.services.replies import format_amount, format_quantity, keyword, quantity_with_unit
 from app.services.summary import DayFigures
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,6 @@ REASONING_EFFORT = "low"
 MAX_LIST = 5  # products listed per line in the template
 MAX_CHARS = 1500  # anything longer is not "short"
 
-LANGUAGE_NAMES = {FR: "French", EN: "English", PCM: "Cameroonian Pidgin English"}
 _WEEKDAYS = {
     FR: ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"],
     EN: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
@@ -91,14 +90,14 @@ TEMPLATES: dict[str, dict[Language, str]] = {
         PCM: "{emoji} {greeting}! How market go for {day}: nothing recorded. Send me your sales as the day dey go, I go handle the rest 💪",
     },
     "offer_today": {
-        FR: "💡 Tape RÉSUMÉ pour voir le bilan du jour.",
-        EN: "💡 Type SUMMARY to see today's summary.",
-        PCM: "💡 Type SUMMARY make you see how market go today.",
+        FR: "💡 Tape {keyword} pour voir le bilan du jour.",
+        EN: "💡 Type {keyword} to see today's summary.",
+        PCM: "💡 Type {keyword} make you see how market go today.",
     },
     "offer_yesterday": {
-        FR: "💡 Tape RÉSUMÉ pour voir le bilan d'hier.",
-        EN: "💡 Type SUMMARY to see yesterday's summary.",
-        PCM: "💡 Type SUMMARY make you see how market go yesterday.",
+        FR: "💡 Tape {keyword} pour voir le bilan d'hier.",
+        EN: "💡 Type {keyword} to see yesterday's summary.",
+        PCM: "💡 Type {keyword} make you see how market go yesterday.",
     },
     "hour_set": {
         FR: "⏰ C'est noté : ton résumé arrivera chaque soir à {hour}h.",
@@ -110,14 +109,20 @@ TEMPLATES: dict[str, dict[Language, str]] = {
 
 # Closing words, by time of day: "Bonne soirée" only in the evening.
 _CLOSINGS = {
-    Language.FR: {Period.MORNING: "Bonne journée ! 🙏", Period.AFTERNOON: "Bonne fin de journée ! 🙏", Period.EVENING: "Bonne soirée ! 🙏"},
-    Language.EN: {Period.MORNING: "Have a good day! 🙏", Period.AFTERNOON: "Have a good afternoon! 🙏", Period.EVENING: "Have a good evening! 🙏"},
-    Language.PIDGIN: {Period.MORNING: "Make the day go well o! 🙏", Period.AFTERNOON: "Make the rest of the day go well o! 🙏", Period.EVENING: "Rest well o! 🙏"},
+    Period.MORNING: {FR: "Bonne journée ! 🙏", EN: "Have a good day! 🙏", PCM: "Make the day go well o! 🙏"},
+    Period.AFTERNOON: {FR: "Bonne fin de journée ! 🙏", EN: "Have a good afternoon! 🙏", PCM: "Make the rest of the day go well o! 🙏"},
+    Period.EVENING: {FR: "Bonne soirée ! 🙏", EN: "Have a good evening! 🙏", PCM: "Rest well o! 🙏"},
 }
 
 
 def _t(key: str, language: Language, **values) -> str:
-    return TEMPLATES[key][language].format(**values)
+    """The template in the merchant's language (translated once for other languages), then filled in."""
+    return translations.localized(f"summary.{key}", TEMPLATES[key], language).format(**values)
+
+
+def _closing(language: Language) -> str:
+    at = greetings.period()
+    return translations.localized(f"summary.closing_{at.value}", _CLOSINGS[at], language)
 
 
 def _greeting_values(language: Language) -> dict:
@@ -125,11 +130,19 @@ def _greeting_values(language: Language) -> dict:
     return {"greeting": greetings.greeting(language), "emoji": greetings.EMOJI[period]}
 
 
+def _day_name(kind: str, names: dict[Language, list[str]], index: int, language: Language) -> str:
+    """Weekday or month name: French, English (also for Pidgin), or translated once."""
+    if language == PCM:
+        language = EN
+    texts = {code: values[index] for code, values in names.items()}
+    return translations.localized(f"summary.{kind}_{index}", texts, language)
+
+
 def day_label(figures: DayFigures, language: Language) -> str:
     """"mardi 27 octobre", "Tuesday 27 October"."""
-    names = FR if language == FR else EN
     day = figures.day
-    return f"{_WEEKDAYS[names][day.weekday()]} {day.day} {_MONTHS[names][day.month - 1]}"
+    weekday = _day_name("weekday", _WEEKDAYS, day.weekday(), language)
+    return f"{weekday} {day.day} {_day_name('month', _MONTHS, day.month - 1, language)}"
 
 
 def _percent(value: int | None) -> str:
@@ -165,14 +178,16 @@ def template(figures: DayFigures, language: Language) -> str:
         lines.append(_t("debts_today", language, repaid=format_amount(figures.debt_repaid_total),
                         new=format_amount(figures.new_debt_total)))
     if figures.debts_outstanding_total:
+        # Plural "s" only where the hand-written text is French, English or Pidgin.
+        s = "s" if figures.debtors_count > 1 and as_language(language).hand_written else ""
         lines.append(_t("outstanding", language, total=format_amount(figures.debts_outstanding_total),
-                        count=figures.debtors_count, s="s" if figures.debtors_count > 1 else ""))
+                        count=figures.debtors_count, s=s))
     if figures.low_stock:
         items = ", ".join(f"{s.name} ({format_quantity(s.stock, language)})" for s in figures.low_stock[:MAX_LIST])
         lines.append(_t("low_stock", language, items=items))
     if figures.out_of_stock:
         lines.append(_t("out_of_stock", language, items=", ".join(s.name for s in figures.out_of_stock[:MAX_LIST])))
-    lines.append(_CLOSINGS[language][greetings.period()])
+    lines.append(_closing(language))
     return "\n".join(lines)
 
 
@@ -181,7 +196,7 @@ def empty_day(figures: DayFigures, language: Language) -> str:
 
 
 def offer(language: Language, yesterday: bool) -> str:
-    return _t("offer_yesterday" if yesterday else "offer_today", language)
+    return _t("offer_yesterday" if yesterday else "offer_today", language, keyword=keyword("summary", language))
 
 
 def hour_set(hour: int, language: Language) -> str:
@@ -265,14 +280,14 @@ def _greeting_ok(text: str, language: Language) -> bool:
     return not any(other.lower() in lowered for other in greetings.other_greetings(language))
 
 
-def _write_with_model(figures: DayFigures, language: Language) -> str:
+def _write_with_model(figures: DayFigures, language: Language, name: str | None) -> str:
     response = meta_client.create_completion(
         model=get_settings().model_text,
         messages=[
             {
                 "role": "system",
                 "content": SUMMARY_PROMPT.format(
-                    language=LANGUAGE_NAMES[language], greeting=greetings.greeting(language),
+                    language=language_name(language, name), greeting=greetings.greeting(language),
                     period=greetings.period().value,
                 ),
             },
@@ -283,12 +298,15 @@ def _write_with_model(figures: DayFigures, language: Language) -> str:
     return (response.choices[0].message.content or "").strip()
 
 
-def write_summary(figures: DayFigures, language: Language) -> str:
-    """The message to send: the model's draft if every amount checks out, the template otherwise."""
+def write_summary(figures: DayFigures, language: Language, name: str | None = None) -> str:
+    """The message to send: the model's draft if every amount checks out, the template otherwise.
+
+    name: the language's English name (shops.language_name), for languages without hand-written texts.
+    """
     if figures.is_empty:
         return empty_day(figures, language)
     try:
-        text = _write_with_model(figures, language)
+        text = _write_with_model(figures, language, name)
     except (openai.OpenAIError, meta_client.MissingAPIKeyError) as exc:
         logger.warning("Summary for shop %s written from the template: model call failed (%s)", figures.shop_id, type(exc).__name__)
         return template(figures, language)
