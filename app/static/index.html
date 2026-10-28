@@ -5,289 +5,644 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Boutiko — Ton assistant de boutique sur WhatsApp</title>
   <meta name="description" content="Boutiko tient les comptes des petites boutiques au Cameroun, directement dans WhatsApp : ventes, stock, dettes clients, notes vocales et photos.">
-  <meta name="theme-color" content="#0b5d3b">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b5d3b'/%3E%3Cpath d='M9 13h14l-1.5 10h-11z' fill='%23f6b93b'/%3E%3Cpath d='M12 13a4 4 0 0 1 8 0' fill='none' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#0a4d33">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230b6b43'/%3E%3Cpath d='M8.5 12.5h15l-1.6 11a2 2 0 0 1-2 1.7h-7.8a2 2 0 0 1-2-1.7z' fill='%23f6b93b'/%3E%3Cpath d='M12 12.5a4 4 0 0 1 8 0' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/style.css">
+  <script>document.documentElement.classList.add("js");</script>
 </head>
 <body>
+  <!-- Icon sprite (decorative, reused with <use>) -->
+  <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="logo" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="9" fill="#0b6b43"/>
+      <path d="M8.5 12.5h15l-1.6 11a2 2 0 0 1-2 1.7h-7.8a2 2 0 0 1-2-1.7z" fill="#f6b93b"/>
+      <path d="M12 12.5a4 4 0 0 1 8 0" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+      <path d="M12.6 18.6l2.3 2.3 4.5-4.6" fill="none" stroke="#0a4d33" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v10.5H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></g></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></g></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></g></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></g></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5L12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5L12 12l8.5-4.5M12 12v9"/></g></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></g></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></g></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5v.01"/></g></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.2 6.3L20.5 11.5l-6.3 2.2L12 20l-2.2-6.3L3.5 11.5l6.3-2.2z"/></g></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></g></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></g></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></g></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></g></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></g></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.4 3.6 8.5s-1.1 5.9-3.6 8.5c-2.5-2.6-3.6-5.4-3.6-8.5S9.5 6.1 12 3.5z"/></g></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-ticks" viewBox="0 0 18 12"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6.5l3 3 6.5-7.5M7 9.5l.8.6 6.7-8"/></g></symbol>
+    <symbol id="i-wa" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.7.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6a2.7 2.7 0 0 0 1.8-1.2 2.2 2.2 0 0 0 .1-1.2c0-.1-.2-.2-.4-.3z"/></symbol>
+    <symbol id="invoice" viewBox="0 0 120 150">
+      <rect x="4" y="4" width="112" height="142" rx="7" fill="#fff" stroke="#d9d4c3" stroke-width="2"/>
+      <rect x="14" y="16" width="46" height="9" rx="2" fill="#0b6b43"/>
+      <rect x="80" y="16" width="26" height="9" rx="2" fill="#ebe6d6"/>
+      <rect x="14" y="31" width="62" height="4" rx="2" fill="#ebe6d6"/>
+      <g fill="#cfd6d0">
+        <rect x="14" y="50" width="52" height="5" rx="2.5"/><rect x="86" y="50" width="20" height="5" rx="2.5"/>
+        <rect x="14" y="64" width="44" height="5" rx="2.5"/><rect x="86" y="64" width="20" height="5" rx="2.5"/>
+        <rect x="14" y="78" width="56" height="5" rx="2.5"/><rect x="86" y="78" width="20" height="5" rx="2.5"/>
+        <rect x="14" y="92" width="38" height="5" rx="2.5"/><rect x="86" y="92" width="20" height="5" rx="2.5"/>
+      </g>
+      <path d="M14 106h92" stroke="#d9d4c3" stroke-width="2"/>
+      <rect x="66" y="114" width="40" height="10" rx="3" fill="#f6b93b"/>
+      <circle cx="32" cy="128" r="11" fill="none" stroke="#e5533c" stroke-width="2.5" opacity=".55"/>
+    </symbol>
+  </svg>
+
   <a class="skip-link" href="#main" data-i18n="skip">Aller au contenu</a>
 
-  <header class="hero">
-    <div class="wrap">
-      <nav class="topbar" aria-label="Boutiko">
-        <span class="brand">
-          <svg class="logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-            <rect width="32" height="32" rx="8" fill="currentColor"/>
-            <path d="M9 13h14l-1.5 10h-11z" fill="#f6b93b"/>
-            <path d="M12 13a4 4 0 0 1 8 0" fill="none" stroke="#0b5d3b" stroke-width="2"/>
-          </svg>
-          Boutiko
-        </span>
-        <button type="button" class="lang-toggle" id="lang-toggle" data-i18n-label="switchLabel" aria-label="Switch to English">
+  <header class="site-header" id="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#top">
+        <svg class="brand-logo" aria-hidden="true" focusable="false"><use href="#logo"/></svg>
+        <span>Boutiko</span>
+      </a>
+      <nav class="nav" aria-label="Sections" data-i18n-label="navLabel">
+        <a href="#comment" data-i18n="navHow">Comment ça marche</a>
+        <a href="#fonctionnalites" data-i18n="navFeatures">Fonctionnalités</a>
+        <a href="#exemple" data-i18n="navExample">Exemple</a>
+        <a href="#technologie" data-i18n="navTech">Technologie</a>
+      </nav>
+      <div class="header-actions">
+        <button type="button" class="lang-toggle" id="lang-toggle" aria-label="Switch to English" data-i18n-label="switchLabel">
+          <svg aria-hidden="true" focusable="false"><use href="#i-globe"/></svg>
           <span aria-hidden="true" data-i18n="switchText">EN</span>
         </button>
-      </nav>
-
-      <h1>Boutiko</h1>
-      <p class="tagline" data-i18n="tagline">Ton assistant de boutique sur WhatsApp</p>
-      <p class="lead" data-i18n="lead">Ventes, stock et crédits clients, tenus pour toi pendant que tu sers tes clients.</p>
-      <a class="cta" href="#" data-demo-link hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.7.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6a2.7 2.7 0 0 0 1.8-1.2 2.2 2.2 0 0 0 .1-1.2c0-.1-.2-.2-.4-.3z" fill="currentColor"/></svg>
-        <span data-i18n="cta">Essayer sur WhatsApp</span>
-      </a>
+        <a class="btn btn-primary btn-sm header-cta" href="#" data-demo-link hidden>
+          <svg aria-hidden="true" focusable="false"><use href="#i-wa"/></svg>
+          <span data-i18n="ctaShort">Essayer</span>
+        </a>
+      </div>
     </div>
   </header>
 
   <main id="main">
-    <section class="section" aria-labelledby="problem-title">
-      <div class="wrap narrow">
-        <p class="eyebrow" data-i18n="problemEyebrow">Le problème</p>
-        <h2 id="problem-title" data-i18n="problemTitle">Une boutique tenue dans un cahier</h2>
-        <p data-i18n="problemText">Au Cameroun, les petits commerçants gèrent leur stock, leurs ventes et les crédits de leurs clients dans des cahiers, ou de tête. Les dettes s'oublient, les ruptures de stock surprennent, et personne ne sait vraiment ce que la journée a rapporté.</p>
-        <ul class="pains">
-          <li data-i18n="pain1">« Maman Brigitte me doit quelque chose pour le sucre… mais combien ? »</li>
-          <li data-i18n="pain2">« Plus de savon Azur, et le client est parti ailleurs. »</li>
+    <!-- 1. Hero -->
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero-bg" aria-hidden="true"><span class="blob blob-1"></span><span class="blob blob-2"></span><span class="blob blob-3"></span></div>
+      <div class="wrap hero-grid">
+        <div class="hero-copy reveal">
+          <p class="pill"><span class="pill-dot" aria-hidden="true"></span><span data-i18n="pill">Pour les boutiques du Cameroun</span></p>
+          <h1 id="hero-title">
+            <span class="h1-brand">Boutiko</span>
+            <span class="h1-tag"><span data-i18n="taglineA">Ton assistant de boutique</span> <span class="hl" data-i18n="taglineB">sur WhatsApp</span></span>
+          </h1>
+          <p class="lead" data-i18n="lead">Ventes, stock et crédits clients : tu envoies un message, Boutiko tient les comptes. Rien à installer, rien à apprendre.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary btn-lg" href="#" data-demo-link hidden>
+              <svg aria-hidden="true" focusable="false"><use href="#i-wa"/></svg>
+              <span data-i18n="cta">Essayer sur WhatsApp</span>
+            </a>
+            <a class="btn btn-ghost btn-lg" href="#comment">
+              <span data-i18n="ctaHow">Voir comment ça marche</span>
+              <svg aria-hidden="true" focusable="false"><use href="#i-down"/></svg>
+            </a>
+          </div>
+          <ul class="trust">
+            <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i18n="trust1">Rien à installer</span></li>
+            <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i18n="trust2">Français, anglais, pidgin</span></li>
+            <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i18n="trust3">Modèles Meta</span></li>
+          </ul>
+        </div>
+
+        <div class="hero-visual reveal" role="img" aria-label="Aperçu : Boutiko lit une facture envoyée en photo et ajoute les produits au stock après confirmation." data-i18n-label="heroVisualLabel">
+          <div class="device" aria-hidden="true">
+            <div class="screen">
+              <div class="wa-top">
+                <svg class="wa-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="wa-avatar"><svg><use href="#logo"/></svg></span>
+                <span class="wa-who"><span class="wa-name">Boutiko</span><span class="wa-status" data-i18n="online">en ligne</span></span>
+              </div>
+              <div class="wa-body">
+                <p class="wa-day" data-i18n="today">Aujourd'hui</p>
+                <div class="msg out photo">
+                  <span class="photo-thumb"><svg class="photo-invoice"><use href="#invoice"/></svg></span>
+                  <span class="msg-text" data-i18n="hc1">Livraison du jour</span>
+                  <span class="meta">09:12 <svg><use href="#i-ticks"/></svg></span>
+                </div>
+                <div class="msg in">
+                  <span class="msg-text" data-i18n="hc2">📷 J'ai lu : 24 savons Azur à 400 et 10 kg de riz à 650. J'enregistre ? Réponds OUI ou NON.</span>
+                  <span class="meta">09:12</span>
+                </div>
+                <div class="msg out short">
+                  <span class="msg-text" data-i18n="yes">OUI</span>
+                  <span class="meta">09:13 <svg><use href="#i-ticks"/></svg></span>
+                </div>
+                <div class="msg in">
+                  <span class="msg-text" data-i18n="hc4">📦 24 savons Azur et 10 kg de riz ajoutés au stock.</span>
+                  <span class="meta">09:13</span>
+                </div>
+              </div>
+              <div class="wa-input">
+                <span class="wa-field">Message</span>
+                <span class="wa-mic"><svg><use href="#i-mic"/></svg></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="float float-a" aria-hidden="true">
+            <span class="float-icon coral"><svg><use href="#i-alert"/></svg></span>
+            <span><strong data-i18n="lowStock">Stock bas</strong><span data-i18n="faText">Sucre · 2 kg</span></span>
+          </div>
+          <div class="float float-b" aria-hidden="true">
+            <span class="avatar a1">M</span>
+            <span><strong>Marie</strong><span data-i18n="fbText">doit 1 400 FCFA</span></span>
+          </div>
+          <div class="float float-c" aria-hidden="true">
+            <span><strong data-i18n="fcTitle">Ventes du jour</strong><span class="big">45 500 FCFA</span></span>
+            <svg class="spark" viewBox="0 0 80 32"><path d="M2 26l12-6 10 4 12-12 10 6 12-10 10 4 10-10" fill="none" stroke="#0e8a55" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 26l12-6 10 4 12-12 10 6 12-10 10 4 10-10V32H2z" fill="#19b36b" opacity=".14"/></svg>
+          </div>
+          <p class="visual-note" data-i18n="heroNote">Aperçu illustratif</p>
+        </div>
+      </div>
+
+      <div class="wrap">
+        <ul class="stats reveal">
+          <li><strong data-i18n="stat1Num">0</strong><span data-i18n="stat1">application à installer</span></li>
+          <li><strong data-i18n="stat2Num">3</strong><span data-i18n="stat2">langues : français, anglais, pidgin</span></li>
+          <li><strong data-i18n="stat3Num">20 h</strong><span data-i18n="stat3">résumé automatique chaque soir</span></li>
+          <li><strong data-i18n="stat4Num">OUI / NON</strong><span data-i18n="stat4">avant d'enregistrer une photo</span></li>
         </ul>
       </div>
     </section>
 
-    <section class="section alt" aria-labelledby="solution-title">
-      <div class="wrap narrow">
-        <p class="eyebrow" data-i18n="solutionEyebrow">La solution</p>
-        <h2 id="solution-title" data-i18n="solutionTitle">Tu écris, tu parles ou tu envoies une photo. Boutiko tient les comptes.</h2>
-        <p data-i18n="solutionText">Pas d'application à installer, pas de compte à créer : tout se passe dans WhatsApp, que tu utilises déjà toute la journée. Boutiko comprend ton message, enregistre la vente, met le stock à jour et note qui te doit quoi.</p>
+    <!-- 2. Problem -->
+    <section class="section" id="probleme" aria-labelledby="problem-title">
+      <div class="wrap split">
+        <div class="split-visual reveal">
+          <svg class="notebook" viewBox="0 0 360 290" role="img" aria-label="Un cahier de comptes rempli de ratures et de points d'interrogation." data-i18n-label="notebookLabel">
+            <ellipse cx="180" cy="272" rx="140" ry="10" fill="#0a4d33" opacity=".1"/>
+            <g transform="rotate(-4 180 145)">
+              <rect x="50" y="26" width="262" height="226" rx="12" fill="#fffdf6" stroke="#e6dcc0" stroke-width="2"/>
+              <g stroke="#cfe0f2" stroke-width="1.5">
+                <path d="M50 70h262M50 96h262M50 122h262M50 148h262M50 174h262M50 200h262M50 226h262"/>
+              </g>
+              <path d="M98 26v226" stroke="#f2a7a0" stroke-width="2"/>
+              <g fill="#0a4d33"><circle cx="50" cy="50" r="6"/><circle cx="50" cy="86" r="6"/><circle cx="50" cy="122" r="6"/><circle cx="50" cy="158" r="6"/><circle cx="50" cy="194" r="6"/><circle cx="50" cy="230" r="6"/></g>
+              <g font-family="'Segoe Print','Bradley Hand','Comic Sans MS',cursive" font-size="15" fill="#2b3b8f">
+                <text x="108" y="64">Marie — sucre 2kg</text>
+                <text x="108" y="90">Paul : 3000 ?</text>
+                <text x="108" y="116">savon Azur 12 → ?</text>
+                <text x="108" y="142">riz 10kg … payé ??</text>
+                <text x="108" y="168">Brigitte — huile</text>
+              </g>
+              <path d="M106 111c14-7 28 4 42-2s28 5 42-1 26 4 34 0" fill="none" stroke="#2b3b8f" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M106 163c18 6 40-6 60 2s34-4 46 1" fill="none" stroke="#2b3b8f" stroke-width="2.2" stroke-linecap="round"/>
+              <circle cx="252" cy="206" r="24" fill="none" stroke="#c8a06a" stroke-width="6" opacity=".3"/>
+            </g>
+            <g transform="rotate(32 300 196)">
+              <rect x="292" y="120" width="15" height="96" rx="3" fill="#f6b93b"/>
+              <rect x="292" y="114" width="15" height="12" rx="2" fill="#e5533c"/>
+              <path d="M292 216l7.5 18 7.5-18z" fill="#f3d9a8"/>
+              <path d="M297 228l2.5 6 2.5-6z" fill="#333"/>
+            </g>
+            <g><circle cx="304" cy="44" r="23" fill="#e5533c"/><text x="304" y="53" text-anchor="middle" font-family="system-ui,sans-serif" font-size="26" font-weight="800" fill="#fff">?</text></g>
+            <g><circle cx="44" cy="246" r="19" fill="#f6b93b"/><text x="44" y="254" text-anchor="middle" font-family="system-ui,sans-serif" font-size="22" font-weight="800" fill="#06301f">!</text></g>
+          </svg>
+        </div>
+        <div class="split-copy reveal">
+          <p class="eyebrow" data-i18n="problemEyebrow">Le problème</p>
+          <h2 id="problem-title" data-i18n="problemTitle">Une boutique tenue dans un cahier</h2>
+          <p class="section-lead" data-i18n="problemText">Au Cameroun, les petits commerçants gèrent leur stock, leurs ventes et les crédits de leurs clients dans des cahiers, ou de tête. Les dettes s'oublient, les ruptures de stock surprennent.</p>
+          <ul class="pains">
+            <li>
+              <span class="pain-icon coral"><svg aria-hidden="true" focusable="false"><use href="#i-users"/></svg></span>
+              <span><strong data-i18n="pain1Title">Des dettes oubliées</strong><span data-i18n="pain1">« Maman Brigitte me doit pour le sucre… mais combien ? »</span></span>
+            </li>
+            <li>
+              <span class="pain-icon amber"><svg aria-hidden="true" focusable="false"><use href="#i-box"/></svg></span>
+              <span><strong data-i18n="pain2Title">Des ruptures qui surprennent</strong><span data-i18n="pain2">Plus de savon Azur, et le client est parti ailleurs.</span></span>
+            </li>
+            <li>
+              <span class="pain-icon green"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg></span>
+              <span><strong data-i18n="pain3Title">Des journées floues</strong><span data-i18n="pain3">Combien ai-je vendu aujourd'hui ? Personne ne le sait vraiment.</span></span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Solution -->
+    <section class="section tinted" id="comment" aria-labelledby="solution-title">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <p class="eyebrow" data-i18n="solutionEyebrow">La solution</p>
+          <h2 id="solution-title" data-i18n="solutionTitle">Tu écris, tu parles ou tu envoies une photo. Boutiko tient les comptes.</h2>
+          <p class="section-lead" data-i18n="solutionText">Pas d'application à installer, pas de compte à créer : tout se passe dans WhatsApp, que tu utilises déjà toute la journée.</p>
+        </div>
         <ol class="steps">
-          <li><strong data-i18n="step1Title">Tu envoies</strong> <span data-i18n="step1">un texte, une note vocale ou une photo</span></li>
-          <li><strong data-i18n="step2Title">Boutiko comprend</strong> <span data-i18n="step2">produit, quantité, prix, client</span></li>
-          <li><strong data-i18n="step3Title">C'est noté</strong> <span data-i18n="step3">et tu reçois une confirmation</span></li>
+          <li class="step reveal">
+            <div class="step-visual">
+              <span class="chip-icon"><svg aria-hidden="true" focusable="false"><use href="#i-chat"/></svg><span data-i18n="chipText">Texte</span></span>
+              <span class="chip-icon"><svg aria-hidden="true" focusable="false"><use href="#i-mic"/></svg><span data-i18n="chipVoice">Voix</span></span>
+              <span class="chip-icon"><svg aria-hidden="true" focusable="false"><use href="#i-camera"/></svg><span data-i18n="chipPhoto">Photo</span></span>
+            </div>
+            <span class="step-num" aria-hidden="true">1</span>
+            <h3 data-i18n="step1Title">Tu envoies</h3>
+            <p data-i18n="step1Text">Un texte, une note vocale ou une photo, comme à un ami.</p>
+          </li>
+          <li class="step reveal">
+            <div class="step-visual">
+              <dl class="fields">
+                <div><dt data-i18n="fieldProduct">Produit</dt><dd data-i18n="valProduct">savon Azur</dd></div>
+                <div><dt data-i18n="fieldQty">Quantité</dt><dd>3</dd></div>
+                <div><dt data-i18n="fieldPrice">Prix</dt><dd>500 FCFA</dd></div>
+              </dl>
+              <span class="spark-badge"><svg aria-hidden="true" focusable="false"><use href="#i-spark"/></svg></span>
+            </div>
+            <span class="step-num" aria-hidden="true">2</span>
+            <h3 data-i18n="step2Title">Boutiko comprend</h3>
+            <p data-i18n="step2Text">Le produit, la quantité, le prix et le client sont reconnus, même avec des fautes ou du pidgin.</p>
+          </li>
+          <li class="step reveal">
+            <div class="step-visual">
+              <ul class="ledger">
+                <li><span class="ok"><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg></span><span data-i18n="ledgerSale">Vente</span><b>1 500 FCFA</b></li>
+                <li><span class="ok"><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg></span><span data-i18n="ledgerStock">Stock savon Azur</span><b>9</b></li>
+              </ul>
+            </div>
+            <span class="step-num" aria-hidden="true">3</span>
+            <h3 data-i18n="step3Title">C'est noté</h3>
+            <p data-i18n="step3Text">La vente est enregistrée, le stock et les dettes sont à jour, et tu reçois une confirmation.</p>
+          </li>
         </ol>
       </div>
     </section>
 
-    <section class="section" aria-labelledby="features-title">
+    <!-- 4. Features -->
+    <section class="section" id="fonctionnalites" aria-labelledby="features-title">
       <div class="wrap">
-        <p class="eyebrow" data-i18n="featuresEyebrow">Fonctionnalités</p>
-        <h2 id="features-title" data-i18n="featuresTitle">Tout ce qu'il faut, rien de plus</h2>
-        <ul class="cards">
-          <li class="card">
-            <span class="icon" aria-hidden="true">🧾</span>
-            <h3 data-i18n="f1Title">Ventes et stock</h3>
-            <p data-i18n="f1Text">Chaque vente retire les articles du stock. Demande « combien de riz ? » et tu as la réponse.</p>
+        <div class="section-head reveal">
+          <p class="eyebrow" data-i18n="featuresEyebrow">Fonctionnalités</p>
+          <h2 id="features-title" data-i18n="featuresTitle">Tout ce qu'il faut pour tenir ta boutique</h2>
+        </div>
+        <ul class="bento">
+          <li class="feature wide reveal">
+            <div class="feature-visual stock-visual" aria-hidden="true">
+              <table class="stock-table">
+                <tr><td data-i18n="prodSoap">Savon Azur</td><td><span class="bar"><span style="--w:55%"></span></span></td><td>9</td></tr>
+                <tr><td data-i18n="prodRice">Riz</td><td><span class="bar"><span style="--w:85%"></span></span></td><td>25 kg</td></tr>
+                <tr class="low"><td data-i18n="prodSugar">Sucre</td><td><span class="bar"><span style="--w:12%"></span></span></td><td>2 kg <span class="tag" data-i18n="lowStock">Stock bas</span></td></tr>
+              </table>
+              <div class="mini-chat">
+                <span class="mini out" data-i18n="askRice">Combien de riz ?</span>
+                <span class="mini in" data-i18n="ansRice">📦 Riz : 25 kg en stock.</span>
+              </div>
+            </div>
+            <div class="feature-body">
+              <span class="feature-icon"><svg aria-hidden="true" focusable="false"><use href="#i-box"/></svg></span>
+              <h3 data-i18n="f1Title">Ventes et stock</h3>
+              <p data-i18n="f1Text">Chaque vente retire les articles du stock, chaque achat les ajoute. Demande « combien de riz ? » et tu as la réponse.</p>
+            </div>
           </li>
-          <li class="card">
-            <span class="icon" aria-hidden="true">📝</span>
-            <h3 data-i18n="f2Title">Dettes clients</h3>
-            <p data-i18n="f2Text">Les ventes à crédit et les remboursements sont notés : tu sais toujours qui te doit combien.</p>
+          <li class="feature reveal">
+            <div class="feature-visual" aria-hidden="true">
+              <ul class="debts">
+                <li class="debts-head"><span data-i18n="toCollect">À encaisser</span><b>4 400 FCFA</b></li>
+                <li><span class="avatar a1">M</span><span>Marie</span><b>1 400 FCFA</b></li>
+                <li><span class="avatar a2">P</span><span>Paul</span><b>3 000 FCFA</b></li>
+                <li class="paid"><span class="avatar a3">B</span><span>Brigitte</span><b data-i18n="settled">Réglé ✓</b></li>
+              </ul>
+            </div>
+            <div class="feature-body">
+              <span class="feature-icon"><svg aria-hidden="true" focusable="false"><use href="#i-users"/></svg></span>
+              <h3 data-i18n="f2Title">Dettes clients</h3>
+              <p data-i18n="f2Text">Ventes à crédit et remboursements sont notés : tu sais toujours qui te doit combien.</p>
+            </div>
           </li>
-          <li class="card">
-            <span class="icon" aria-hidden="true">🎙️</span>
-            <h3 data-i18n="f3Title">Notes vocales</h3>
-            <p data-i18n="f3Text">Parle comme d'habitude, en français, en anglais ou en pidgin. Boutiko écoute et comprend.</p>
+          <li class="feature reveal">
+            <div class="feature-visual" aria-hidden="true">
+              <div class="voice-note">
+                <span class="play"><svg><use href="#i-play"/></svg></span>
+                <span class="wave">
+                  <i style="--h:30%"></i><i style="--h:60%"></i><i style="--h:45%"></i><i style="--h:80%"></i><i style="--h:55%"></i><i style="--h:95%"></i><i style="--h:70%"></i><i style="--h:40%"></i><i style="--h:65%"></i><i style="--h:85%"></i><i style="--h:50%"></i><i style="--h:30%"></i><i style="--h:60%"></i><i style="--h:75%"></i><i style="--h:45%"></i><i style="--h:25%"></i><i style="--h:55%"></i><i style="--h:35%"></i>
+                </span>
+                <span class="dur">0:06</span>
+              </div>
+              <p class="transcript">« Marie don take two kilo sugar for credit »</p>
+              <div class="langs"><span>Français</span><span>English</span><span>Pidgin</span></div>
+            </div>
+            <div class="feature-body">
+              <span class="feature-icon"><svg aria-hidden="true" focusable="false"><use href="#i-mic"/></svg></span>
+              <h3 data-i18n="f3Title">Notes vocales</h3>
+              <p data-i18n="f3Text">Parle comme d'habitude, en français, en anglais ou en pidgin. Boutiko écoute et comprend.</p>
+            </div>
           </li>
-          <li class="card">
-            <span class="icon" aria-hidden="true">📷</span>
-            <h3 data-i18n="f4Title">Photos de factures et de produits</h3>
-            <p data-i18n="f4Text">Envoie la facture du fournisseur ou la photo d'un produit. Boutiko te montre ce qu'il a lu et attend ton OUI ou ton NON avant d'enregistrer.</p>
+          <li class="feature wide reveal">
+            <div class="feature-visual photo-visual" aria-hidden="true">
+              <span class="scan"><svg class="scan-invoice"><use href="#invoice"/></svg><span class="scan-line"></span></span>
+              <div class="confirm">
+                <p data-i18n="readLines">📷 J'ai lu 2 lignes : 24 savons Azur, 10 kg de riz. J'enregistre ?</p>
+                <div class="confirm-actions"><span class="yes" data-i18n="yes">OUI</span><span class="no" data-i18n="no">NON</span></div>
+              </div>
+            </div>
+            <div class="feature-body">
+              <span class="feature-icon"><svg aria-hidden="true" focusable="false"><use href="#i-camera"/></svg></span>
+              <h3 data-i18n="f4Title">Photos de factures et de produits</h3>
+              <p data-i18n="f4Text">Envoie la facture du fournisseur ou la photo d'un produit. Boutiko te montre ce qu'il a lu et attend ton OUI ou ton NON avant d'enregistrer.</p>
+            </div>
           </li>
-          <li class="card">
-            <span class="icon" aria-hidden="true">🌙</span>
-            <h3 data-i18n="f5Title">Résumé du soir</h3>
-            <p data-i18n="f5Text">Chaque soir, un message court : ventes du jour, meilleurs produits, stock bas et dettes en cours.</p>
+          <li class="feature full reveal">
+            <div class="feature-visual summary-visual" aria-hidden="true">
+              <div class="notif">
+                <div class="notif-top"><svg><use href="#logo"/></svg><span>Boutiko</span><span class="notif-time">20:00</span></div>
+                <p class="notif-title" data-i18n="sumTitle">🌙 Ta journée en bref</p>
+                <ul>
+                  <li data-i18n="sum1">12 ventes · 45 500 FCFA</li>
+                  <li data-i18n="sum2">Meilleure vente : savon Azur</li>
+                  <li data-i18n="sum3">Stock bas : sucre (2 kg)</li>
+                  <li data-i18n="sum4">À encaisser : 4 400 FCFA</li>
+                </ul>
+              </div>
+            </div>
+            <div class="feature-body">
+              <span class="feature-icon"><svg aria-hidden="true" focusable="false"><use href="#i-moon"/></svg></span>
+              <h3 data-i18n="f5Title">Résumé du soir automatique</h3>
+              <p data-i18n="f5Text">Chaque soir, un message court : ventes du jour, meilleurs produits, stock bas et dettes en cours. L'heure se règle d'un simple message.</p>
+            </div>
           </li>
         </ul>
       </div>
     </section>
 
-    <section class="section alt" aria-labelledby="chat-title">
-      <div class="wrap narrow">
-        <p class="eyebrow" data-i18n="chatEyebrow">Exemple</p>
-        <h2 id="chat-title" data-i18n="chatTitle">Une conversation avec Boutiko</h2>
-        <figure class="phone">
-          <div class="chat" role="list">
-            <p class="bubble out" role="listitem">
-              <span class="visually-hidden" data-i18n="you">Commerçant :</span>
-              <span data-i18n="m1">J'ai vendu 3 savons Azur à 500</span>
-              <span class="time" aria-hidden="true">10:42</span>
-            </p>
-            <p class="bubble in" role="listitem">
-              <span class="visually-hidden">Boutiko :</span>
-              <span data-i18n="m2">✅ 3 savons Azur vendus, 1 500 FCFA. Reste : 9.</span>
-              <span class="time" aria-hidden="true">10:42</span>
-            </p>
-            <p class="bubble out" role="listitem">
-              <span class="visually-hidden" data-i18n="you">Commerçant :</span>
-              <span data-i18n="m3">Marie a pris 2 kg de sucre à crédit, 700 le kilo</span>
-              <span class="time" aria-hidden="true">11:05</span>
-            </p>
-            <p class="bubble in" role="listitem">
-              <span class="visually-hidden">Boutiko :</span>
-              <span data-i18n="m4">📝 2 kg de sucre à crédit pour Marie, 1 400 FCFA. Marie doit maintenant 1 400 FCFA.</span>
-              <span class="time" aria-hidden="true">11:05</span>
-            </p>
+    <!-- 5. Example conversation -->
+    <section class="section tinted" id="exemple" aria-labelledby="chat-title">
+      <div class="wrap split reverse">
+        <div class="split-copy reveal">
+          <p class="eyebrow" data-i18n="chatEyebrow">Exemple</p>
+          <h2 id="chat-title" data-i18n="chatTitle">Une conversation avec Boutiko</h2>
+          <p class="section-lead" data-i18n="chatText">Le commerçant écrit comme il parle. Boutiko répond en une ligne, avec le stock ou la dette à jour.</p>
+          <ul class="callouts">
+            <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i18n="co1">Produit, quantité et prix compris en une phrase</span></li>
+            <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i18n="co2">Stock restant indiqué après chaque vente</span></li>
+            <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i18n="co3">Dettes calculées automatiquement</span></li>
+          </ul>
+        </div>
+        <figure class="split-visual example reveal">
+          <div class="device">
+            <div class="screen">
+              <div class="wa-top" aria-hidden="true">
+                <svg class="wa-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="wa-avatar"><svg><use href="#logo"/></svg></span>
+                <span class="wa-who"><span class="wa-name">Boutiko</span><span class="wa-status" data-i18n="online">en ligne</span></span>
+              </div>
+              <div class="wa-body" role="list">
+                <div class="msg out" role="listitem">
+                  <span class="visually-hidden" data-i18n="you">Commerçant :</span>
+                  <span class="msg-text" data-i18n="m1">J'ai vendu 3 savons Azur à 500</span>
+                  <span class="meta" aria-hidden="true">10:42 <svg><use href="#i-ticks"/></svg></span>
+                </div>
+                <div class="msg in" role="listitem">
+                  <span class="visually-hidden">Boutiko :</span>
+                  <span class="msg-text" data-i18n="m2">✅ 3 savons Azur vendus, 1 500 FCFA. Reste : 9.</span>
+                  <span class="meta" aria-hidden="true">10:42</span>
+                </div>
+                <div class="msg out" role="listitem">
+                  <span class="visually-hidden" data-i18n="you">Commerçant :</span>
+                  <span class="msg-text" data-i18n="m3">Marie a pris 2 kg de sucre à crédit, 700 le kilo</span>
+                  <span class="meta" aria-hidden="true">11:05 <svg><use href="#i-ticks"/></svg></span>
+                </div>
+                <div class="msg in" role="listitem">
+                  <span class="visually-hidden">Boutiko :</span>
+                  <span class="msg-text" data-i18n="m4">📝 2 kg de sucre à crédit pour Marie, 1 400 FCFA. Marie doit maintenant 1 400 FCFA.</span>
+                  <span class="meta" aria-hidden="true">11:05</span>
+                </div>
+              </div>
+              <div class="wa-input" aria-hidden="true">
+                <span class="wa-field">Message</span>
+                <span class="wa-mic"><svg><use href="#i-mic"/></svg></span>
+              </div>
+            </div>
           </div>
           <figcaption data-i18n="chatNote">Illustration : les messages réels peuvent varier légèrement.</figcaption>
         </figure>
       </div>
     </section>
 
+    <!-- 6. Try it -->
     <section class="section try" aria-labelledby="try-title" data-demo-section hidden>
-      <div class="wrap narrow center">
-        <h2 id="try-title" data-i18n="tryTitle">Essaie Boutiko maintenant</h2>
-        <p data-i18n="tryText">Envoie un premier message, par exemple « J'ai 20 savons Azur en stock ».</p>
-        <a class="cta" href="#" data-demo-link>
-          <span data-i18n="cta">Essayer sur WhatsApp</span>
-        </a>
+      <div class="wrap">
+        <div class="try-card reveal">
+          <div class="try-copy">
+            <h2 id="try-title" data-i18n="tryTitle">Essaie Boutiko maintenant</h2>
+            <p data-i18n="tryText">Envoie un premier message, par exemple « J'ai 20 savons Azur en stock ».</p>
+          </div>
+          <a class="btn btn-light btn-lg" href="#" data-demo-link>
+            <svg aria-hidden="true" focusable="false"><use href="#i-wa"/></svg>
+            <span data-i18n="cta">Essayer sur WhatsApp</span>
+          </a>
+        </div>
       </div>
     </section>
 
-    <section class="section" aria-labelledby="tech-title">
-      <div class="wrap narrow">
-        <p class="eyebrow" data-i18n="techEyebrow">Technologie</p>
-        <h2 id="tech-title" data-i18n="techTitle">Propulsé par les modèles Meta</h2>
-        <p data-i18n="techText">Propulsé par les modèles Meta (Muse Spark, Muse Voice) via la Meta Model API.</p>
-        <p>
-          <a class="text-link" href="https://github.com/celestedev445-hub/boutiko" rel="noopener">
+    <!-- 7. Technology -->
+    <section class="section tech" id="technologie" aria-labelledby="tech-title">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <p class="eyebrow" data-i18n="techEyebrow">Technologie</p>
+          <h2 id="tech-title" data-i18n="techTitle">Propulsé par les modèles Meta</h2>
+          <p class="section-lead" data-i18n="techText">Propulsé par les modèles Meta (Muse Spark, Muse Voice) via la Meta Model API.</p>
+        </div>
+        <ul class="models">
+          <li class="model reveal">
+            <span class="model-icon"><svg aria-hidden="true" focusable="false"><use href="#i-spark"/></svg></span>
+            <h3>Muse Spark</h3>
+            <p data-i18n="model1">Comprend les messages écrits et lit les photos de factures et de produits.</p>
+          </li>
+          <li class="model reveal">
+            <span class="model-icon"><svg aria-hidden="true" focusable="false"><use href="#i-mic"/></svg></span>
+            <h3>Muse Voice</h3>
+            <p data-i18n="model2">Transcrit les notes vocales, en français, en anglais ou en pidgin.</p>
+          </li>
+          <li class="model reveal">
+            <span class="model-icon"><svg aria-hidden="true" focusable="false"><use href="#i-code"/></svg></span>
+            <h3>Meta Model API</h3>
+            <p data-i18n="model3">Un seul fournisseur de modèles : aucun autre service d'IA.</p>
+          </li>
+        </ul>
+        <p class="repo reveal">
+          <a class="btn btn-outline-light" href="https://github.com/celestedev445-hub/boutiko" rel="noopener">
+            <svg aria-hidden="true" focusable="false"><use href="#i-code"/></svg>
             <span data-i18n="repo">Voir le code sur GitHub</span>
-            <span aria-hidden="true">→</span>
+            <svg aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg>
           </a>
         </p>
       </div>
     </section>
   </main>
 
+  <!-- 8. Footer -->
   <footer class="footer">
-    <div class="wrap">© 2026 Boutiko</div>
+    <div class="wrap footer-inner">
+      <span class="brand">
+        <svg class="brand-logo" aria-hidden="true" focusable="false"><use href="#logo"/></svg>
+        <span>Boutiko</span>
+      </span>
+      <span class="footer-tag" data-i18n="footerTag">Ton assistant de boutique sur WhatsApp</span>
+      <span>© 2026 Boutiko</span>
+    </div>
   </footer>
 
   <script>
     (function () {
-      var TEXTS = {
-        fr: {
-          title: "Boutiko — Ton assistant de boutique sur WhatsApp",
-          skip: "Aller au contenu",
-          switchText: "EN",
-          switchLabel: "Switch to English",
-          tagline: "Ton assistant de boutique sur WhatsApp",
-          lead: "Ventes, stock et crédits clients, tenus pour toi pendant que tu sers tes clients.",
-          cta: "Essayer sur WhatsApp",
-          problemEyebrow: "Le problème",
-          problemTitle: "Une boutique tenue dans un cahier",
-          problemText: "Au Cameroun, les petits commerçants gèrent leur stock, leurs ventes et les crédits de leurs clients dans des cahiers, ou de tête. Les dettes s'oublient, les ruptures de stock surprennent, et personne ne sait vraiment ce que la journée a rapporté.",
-          pain1: "« Maman Brigitte me doit quelque chose pour le sucre… mais combien ? »",
-          pain2: "« Plus de savon Azur, et le client est parti ailleurs. »",
-          solutionEyebrow: "La solution",
-          solutionTitle: "Tu écris, tu parles ou tu envoies une photo. Boutiko tient les comptes.",
-          solutionText: "Pas d'application à installer, pas de compte à créer : tout se passe dans WhatsApp, que tu utilises déjà toute la journée. Boutiko comprend ton message, enregistre la vente, met le stock à jour et note qui te doit quoi.",
-          step1Title: "Tu envoies",
-          step1: "un texte, une note vocale ou une photo",
-          step2Title: "Boutiko comprend",
-          step2: "produit, quantité, prix, client",
-          step3Title: "C'est noté",
-          step3: "et tu reçois une confirmation",
-          featuresEyebrow: "Fonctionnalités",
-          featuresTitle: "Tout ce qu'il faut, rien de plus",
-          f1Title: "Ventes et stock",
-          f1Text: "Chaque vente retire les articles du stock. Demande « combien de riz ? » et tu as la réponse.",
-          f2Title: "Dettes clients",
-          f2Text: "Les ventes à crédit et les remboursements sont notés : tu sais toujours qui te doit combien.",
-          f3Title: "Notes vocales",
-          f3Text: "Parle comme d'habitude, en français, en anglais ou en pidgin. Boutiko écoute et comprend.",
-          f4Title: "Photos de factures et de produits",
-          f4Text: "Envoie la facture du fournisseur ou la photo d'un produit. Boutiko te montre ce qu'il a lu et attend ton OUI ou ton NON avant d'enregistrer.",
-          f5Title: "Résumé du soir",
-          f5Text: "Chaque soir, un message court : ventes du jour, meilleurs produits, stock bas et dettes en cours.",
-          chatEyebrow: "Exemple",
-          chatTitle: "Une conversation avec Boutiko",
-          you: "Commerçant :",
-          m1: "J'ai vendu 3 savons Azur à 500",
-          m2: "✅ 3 savons Azur vendus, 1 500 FCFA. Reste : 9.",
-          m3: "Marie a pris 2 kg de sucre à crédit, 700 le kilo",
-          m4: "📝 2 kg de sucre à crédit pour Marie, 1 400 FCFA. Marie doit maintenant 1 400 FCFA.",
-          chatNote: "Illustration : les messages réels peuvent varier légèrement.",
-          tryTitle: "Essaie Boutiko maintenant",
-          tryText: "Envoie un premier message, par exemple « J'ai 20 savons Azur en stock ».",
-          techEyebrow: "Technologie",
-          techTitle: "Propulsé par les modèles Meta",
-          techText: "Propulsé par les modèles Meta (Muse Spark, Muse Voice) via la Meta Model API.",
-          repo: "Voir le code sur GitHub"
-        },
-        en: {
-          title: "Boutiko — Your shop assistant on WhatsApp",
-          skip: "Skip to content",
-          switchText: "FR",
-          switchLabel: "Passer en français",
-          tagline: "Your shop assistant on WhatsApp",
-          lead: "Sales, stock and customer credit, kept for you while you serve your customers.",
-          cta: "Try it on WhatsApp",
-          problemEyebrow: "The problem",
-          problemTitle: "A shop run from a notebook",
-          problemText: "In Cameroon, small shopkeepers track their stock, sales and customer credit in notebooks, or in their heads. Debts get forgotten, stock-outs come as a surprise, and nobody really knows what the day brought in.",
-          pain1: "“Maman Brigitte owes me something for the sugar… but how much?”",
-          pain2: "“Out of Azur soap, and the customer went elsewhere.”",
-          solutionEyebrow: "The solution",
-          solutionTitle: "Type it, say it or send a photo. Boutiko keeps the books.",
-          solutionText: "No app to install, no account to create: it all happens in WhatsApp, which you already use all day. Boutiko understands your message, records the sale, updates the stock and notes who owes you what.",
-          step1Title: "You send",
-          step1: "a text, a voice note or a photo",
-          step2Title: "Boutiko understands",
-          step2: "product, quantity, price, customer",
-          step3Title: "It's recorded",
-          step3: "and you get a confirmation",
-          featuresEyebrow: "Features",
-          featuresTitle: "Everything you need, nothing more",
-          f1Title: "Sales and stock",
-          f1Text: "Every sale takes the items out of stock. Ask “how much rice?” and you get the answer.",
-          f2Title: "Customer debts",
-          f2Text: "Credit sales and repayments are recorded: you always know who owes you how much.",
-          f3Title: "Voice notes",
-          f3Text: "Speak as usual, in French, English or Pidgin. Boutiko listens and understands.",
-          f4Title: "Invoice and product photos",
-          f4Text: "Send the supplier's invoice or a photo of a product. Boutiko shows you what it read and waits for your YES or NO before saving.",
-          f5Title: "Evening summary",
-          f5Text: "Every evening, a short message: today's sales, best sellers, low stock and open debts.",
-          chatEyebrow: "Example",
-          chatTitle: "A conversation with Boutiko",
-          you: "Shopkeeper:",
-          m1: "Sold 3 Azur soaps at 500",
-          m2: "✅ 3 Azur soaps sold, 1 500 FCFA. Left: 9.",
-          m3: "Marie took 2 kg of sugar on credit, 700 a kilo",
-          m4: "📝 2 kg of sugar on credit for Marie, 1 400 FCFA. Marie now owes 1 400 FCFA.",
-          chatNote: "Illustration: real messages may differ slightly.",
-          tryTitle: "Try Boutiko now",
-          tryText: "Send a first message, for example “I have 20 Azur soaps in stock”.",
-          techEyebrow: "Technology",
-          techTitle: "Powered by Meta models",
-          techText: "Powered by Meta models (Muse Spark, Muse Voice) through the Meta Model API.",
-          repo: "See the code on GitHub"
-        }
+      // French is written in the page itself; English lives here.
+      var EN = {
+        title: "Boutiko — Your shop assistant on WhatsApp",
+        skip: "Skip to content",
+        navLabel: "Sections",
+        navHow: "How it works",
+        navFeatures: "Features",
+        navExample: "Example",
+        navTech: "Technology",
+        switchText: "FR",
+        switchLabel: "Passer en français",
+        ctaShort: "Try it",
+        pill: "For shops in Cameroon",
+        taglineA: "Your shop assistant",
+        taglineB: "on WhatsApp",
+        lead: "Sales, stock and customer credit: you send a message, Boutiko keeps the books. Nothing to install, nothing to learn.",
+        cta: "Try it on WhatsApp",
+        ctaHow: "See how it works",
+        trust1: "Nothing to install",
+        trust2: "French, English, Pidgin",
+        trust3: "Meta models",
+        heroVisualLabel: "Preview: Boutiko reads an invoice sent as a photo and adds the products to stock after confirmation.",
+        online: "online",
+        today: "Today",
+        hc1: "Today's delivery",
+        hc2: "📷 I read: 24 Azur soaps at 400 and 10 kg of rice at 650. Save it? Reply YES or NO.",
+        yes: "YES",
+        no: "NO",
+        hc4: "📦 24 Azur soaps and 10 kg of rice added to stock.",
+        lowStock: "Low stock",
+        faText: "Sugar · 2 kg",
+        fbText: "owes 1 400 FCFA",
+        fcTitle: "Today's sales",
+        heroNote: "Illustrative preview",
+        stat1Num: "0",
+        stat1: "app to install",
+        stat2Num: "3",
+        stat2: "languages: French, English, Pidgin",
+        stat3Num: "8 pm",
+        stat3: "automatic summary every evening",
+        stat4Num: "YES / NO",
+        stat4: "before saving a photo",
+        notebookLabel: "An account notebook full of crossings-out and question marks.",
+        problemEyebrow: "The problem",
+        problemTitle: "A shop run from a notebook",
+        problemText: "In Cameroon, small shopkeepers track their stock, sales and customer credit in notebooks, or in their heads. Debts get forgotten, stock-outs come as a surprise.",
+        pain1Title: "Forgotten debts",
+        pain1: "“Maman Brigitte owes me for the sugar… but how much?”",
+        pain2Title: "Surprise stock-outs",
+        pain2: "Out of Azur soap, and the customer went elsewhere.",
+        pain3Title: "Blurry days",
+        pain3: "How much did I sell today? Nobody really knows.",
+        solutionEyebrow: "The solution",
+        solutionTitle: "Type it, say it or send a photo. Boutiko keeps the books.",
+        solutionText: "No app to install, no account to create: it all happens in WhatsApp, which you already use all day.",
+        chipText: "Text",
+        chipVoice: "Voice",
+        chipPhoto: "Photo",
+        step1Title: "You send",
+        step1Text: "A text, a voice note or a photo, as you would to a friend.",
+        fieldProduct: "Product",
+        fieldQty: "Quantity",
+        fieldPrice: "Price",
+        valProduct: "Azur soap",
+        step2Title: "Boutiko understands",
+        step2Text: "Product, quantity, price and customer are recognised, even with typos or Pidgin.",
+        ledgerSale: "Sale",
+        ledgerStock: "Azur soap stock",
+        step3Title: "It's recorded",
+        step3Text: "The sale is saved, stock and debts are up to date, and you get a confirmation.",
+        featuresEyebrow: "Features",
+        featuresTitle: "Everything you need to run your shop",
+        prodSoap: "Azur soap",
+        prodRice: "Rice",
+        prodSugar: "Sugar",
+        askRice: "How much rice?",
+        ansRice: "📦 Rice: 25 kg in stock.",
+        f1Title: "Sales and stock",
+        f1Text: "Every sale takes items out of stock, every purchase adds them. Ask “how much rice?” and you get the answer.",
+        toCollect: "To collect",
+        settled: "Paid ✓",
+        f2Title: "Customer debts",
+        f2Text: "Credit sales and repayments are recorded: you always know who owes you how much.",
+        f3Title: "Voice notes",
+        f3Text: "Speak as usual, in French, English or Pidgin. Boutiko listens and understands.",
+        readLines: "📷 I read 2 lines: 24 Azur soaps, 10 kg of rice. Save them?",
+        f4Title: "Invoice and product photos",
+        f4Text: "Send the supplier's invoice or a photo of a product. Boutiko shows you what it read and waits for your YES or NO before saving.",
+        sumTitle: "🌙 Your day at a glance",
+        sum1: "12 sales · 45 500 FCFA",
+        sum2: "Best seller: Azur soap",
+        sum3: "Low stock: sugar (2 kg)",
+        sum4: "To collect: 4 400 FCFA",
+        f5Title: "Automatic evening summary",
+        f5Text: "Every evening, a short message: today's sales, best sellers, low stock and open debts. Change the time with a simple message.",
+        chatEyebrow: "Example",
+        chatTitle: "A conversation with Boutiko",
+        chatText: "The shopkeeper writes the way they speak. Boutiko answers in one line, with the stock or the debt up to date.",
+        co1: "Product, quantity and price understood in one sentence",
+        co2: "Remaining stock shown after every sale",
+        co3: "Debts worked out automatically",
+        you: "Shopkeeper:",
+        m1: "Sold 3 Azur soaps at 500",
+        m2: "✅ 3 Azur soaps sold, 1 500 FCFA. Left: 9.",
+        m3: "Marie took 2 kg of sugar on credit, 700 a kilo",
+        m4: "📝 2 kg of sugar on credit for Marie, 1 400 FCFA. Marie now owes 1 400 FCFA.",
+        chatNote: "Illustration: real messages may differ slightly.",
+        tryTitle: "Try Boutiko now",
+        tryText: "Send a first message, for example “I have 20 Azur soaps in stock”.",
+        techEyebrow: "Technology",
+        techTitle: "Powered by Meta models",
+        techText: "Powered by Meta models (Muse Spark, Muse Voice) through the Meta Model API.",
+        model1: "Understands written messages and reads photos of invoices and products.",
+        model2: "Transcribes voice notes, in French, English or Pidgin.",
+        model3: "A single model provider: no other AI service.",
+        repo: "See the code on GitHub",
+        footerTag: "Your shop assistant on WhatsApp"
       };
       var KEY = "boutiko-lang";
+      var root = document.documentElement;
+      var texts = document.querySelectorAll("[data-i18n]");
+      var labels = document.querySelectorAll("[data-i18n-label]");
+      var frenchTitle = document.title;
 
-      function stored() {
-        try { return localStorage.getItem(KEY); } catch (e) { return null; }
-      }
+      // Keep the French text of the page to switch back to it.
+      texts.forEach(function (el) { el.setAttribute("data-fr", el.textContent); });
+      labels.forEach(function (el) { el.setAttribute("data-fr-label", el.getAttribute("aria-label") || ""); });
 
       function apply(lang) {
-        var t = TEXTS[lang] || TEXTS.fr;
-        document.documentElement.lang = lang;
-        document.title = t.title;
-        document.querySelectorAll("[data-i18n]").forEach(function (el) {
-          var text = t[el.getAttribute("data-i18n")];
-          if (text) el.textContent = text;
+        var en = lang === "en";
+        root.lang = lang;
+        document.title = en ? EN.title : frenchTitle;
+        texts.forEach(function (el) {
+          var text = en ? EN[el.getAttribute("data-i18n")] : null;
+          el.textContent = text || el.getAttribute("data-fr");
         });
-        document.querySelectorAll("[data-i18n-label]").forEach(function (el) {
-          el.setAttribute("aria-label", t[el.getAttribute("data-i18n-label")]);
+        labels.forEach(function (el) {
+          var text = en ? EN[el.getAttribute("data-i18n-label")] : null;
+          el.setAttribute("aria-label", text || el.getAttribute("data-fr-label"));
         });
+        // The French button label is in English ("Switch to English") and vice versa.
         try { localStorage.setItem(KEY, lang); } catch (e) { /* private mode: not remembered */ }
       }
 
-      var current = stored() === "en" ? "en" : "fr";
-      apply(current);
+      var current = "fr";
+      try { if (localStorage.getItem(KEY) === "en") current = "en"; } catch (e) { /* default */ }
+      if (current === "en") apply("en");
       document.getElementById("lang-toggle").addEventListener("click", function () {
         current = current === "fr" ? "en" : "fr";
         apply(current);
       });
 
+      // "Try it on WhatsApp": only when a demo number is configured.
       fetch("/api/public-config")
         .then(function (response) { return response.ok ? response.json() : {}; })
         .then(function (config) {
@@ -301,6 +656,28 @@
           document.querySelectorAll("[data-demo-section]").forEach(function (el) { el.hidden = false; });
         })
         .catch(function () { /* no button */ });
+
+      // Header shadow once the page scrolls.
+      var header = document.getElementById("site-header");
+      function onScroll() { header.classList.toggle("scrolled", window.scrollY > 8); }
+      window.addEventListener("scroll", onScroll, { passive: true });
+      onScroll();
+
+      // Fade sections in as they appear.
+      var items = document.querySelectorAll(".reveal");
+      if (!("IntersectionObserver" in window)) {
+        items.forEach(function (el) { el.classList.add("is-visible"); });
+        return;
+      }
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+      items.forEach(function (el) { observer.observe(el); });
     })();
   </script>
 </body>
