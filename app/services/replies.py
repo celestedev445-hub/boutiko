@@ -5,30 +5,49 @@ from decimal import Decimal
 from app.models import Language
 from app.schemas import Action, ExtractedAction, Extraction
 from app.services.ledger import ActionResult, LedgerResult, LedgerWarning
+from app.services import products
+from app.services.products import ProductChoice
 from app.services.normalize import is_generic_unit
 
 FR, EN, PCM = Language.FR, Language.EN, Language.PIDGIN
 
 TEXTS: dict[str, dict[Language, str]] = {
     "sale": {
-        FR: "✅ {item} {sold}, {total}. Reste : {stock}.",
-        EN: "✅ {item} sold, {total}. Left: {stock}.",
-        PCM: "✅ {item} don sell, {total}. Remain: {stock}.",
+        FR: "✅ {item} {sold}, {total}.",
+        EN: "✅ {item} sold, {total}.",
+        PCM: "✅ {item} don sell, {total}.",
     },
     "sale_no_price": {
-        FR: "✅ {item} {sold}. Reste : {stock}.",
-        EN: "✅ {item} sold. Left: {stock}.",
-        PCM: "✅ {item} don sell. Remain: {stock}.",
+        FR: "✅ {item} {sold}.",
+        EN: "✅ {item} sold.",
+        PCM: "✅ {item} don sell.",
     },
     "credit_sale": {
-        FR: "📝 {item} à crédit pour {customer}, {total}. Reste : {stock}.",
-        EN: "📝 {item} on credit for {customer}, {total}. Left: {stock}.",
-        PCM: "📝 {customer} don take {item} for credit, {total}. Remain: {stock}.",
+        FR: "📝 {item} à crédit pour {customer}, {total}.",
+        EN: "📝 {item} on credit for {customer}, {total}.",
+        PCM: "📝 {customer} don take {item} for credit, {total}.",
     },
     "credit_sale_no_price": {
-        FR: "📝 {item} à crédit pour {customer}. Reste : {stock}.",
-        EN: "📝 {item} on credit for {customer}. Left: {stock}.",
-        PCM: "📝 {customer} don take {item} for credit. Remain: {stock}.",
+        FR: "📝 {item} à crédit pour {customer}.",
+        EN: "📝 {item} on credit for {customer}.",
+        PCM: "📝 {customer} don take {item} for credit.",
+    },
+    "remaining": {FR: " Reste : {stock}.", EN: " Left: {stock}.", PCM: " Remain: {stock}."},
+    "set_stock": {
+        FR: "📦 {product} : {stock} en stock, c'est noté.",
+        EN: "📦 {product}: {stock} in stock, noted.",
+        PCM: "📦 {product}: {stock} dey for stock, I don write am.",
+    },
+    "choose_product": {
+        FR: "🤔 Quel {query} : {options} ?",
+        EN: "🤔 Which {query}: {options}?",
+        PCM: "🤔 Which {query}: {options}?",
+    },
+    "or": {FR: "ou", EN: "or", PCM: "or"},
+    "welcome": {
+        FR: "👋 {greeting} ! Envoie-moi tes ventes, achats ou dettes, en texte, en vocal ou en photo, par exemple « vendu 3 savons à 250 ». Tape RÉSUMÉ pour le bilan du jour.",
+        EN: "👋 {greeting}! Send me your sales, purchases or debts, by text, voice note or photo, for example \"sold 3 soaps at 250\". Type SUMMARY for today's summary.",
+        PCM: "👋 {greeting}! Send me your sales, wetin you buy or who dey owe, for text, voice or photo, like \"I sell 3 soap 250 each\". Type SUMMARY make you see how market go today.",
     },
     "purchase": {
         FR: "📦 {item} {added} au stock. Stock : {stock}.",
@@ -91,9 +110,19 @@ TEXTS: dict[str, dict[Language, str]] = {
         PCM: "⚠️ How much {customer} pay? Send am again with the money.",
     },
     LedgerWarning.UNKNOWN_PRODUCT: {
-        FR: "📦 Je ne connais pas encore « {product} ». Note un achat pour l'ajouter au stock.",
-        EN: "📦 I don't know \"{product}\" yet. Record a purchase to add it to your stock.",
-        PCM: "📦 I never know \"{product}\" yet. Record wetin you buy make I add am.",
+        FR: "📦 Je ne connais pas encore « {product} ». Envoie un achat pour l'ajouter.",
+        EN: "📦 I don't know \"{product}\" yet. Send a purchase to add it.",
+        PCM: "📦 I never know \"{product}\" yet. Send wetin you buy make I add am.",
+    },
+    LedgerWarning.FORBIDDEN_PRODUCT: {
+        FR: "🤔 « {product} » n'est pas un produit. De quel produit tu parles ?",
+        EN: "🤔 \"{product}\" isn't a product. Which product do you mean?",
+        PCM: "🤔 \"{product}\" no be product. Which product you mean?",
+    },
+    LedgerWarning.STOCK_UNKNOWN: {
+        FR: "💡 Dis-moi combien tu as {of_product} en stock pour que je le suive.",
+        EN: "💡 Tell me how many {product} you have in stock so I can follow it.",
+        PCM: "💡 Tell me how many {product} you get for stock make I follow am.",
     },
     "not_understood": {
         FR: "🤔 Je n'ai pas compris. Écris par exemple : « vendu 3 savons à 250 » ou « Marie a pris 2 kg de sucre à crédit ».",
@@ -143,6 +172,11 @@ TEXTS: dict[str, dict[Language, str]] = {
         PCM: "• {customer} pay{amount}",
     },
     "summary_stock_check": {FR: "• Stock de {product}", EN: "• Stock of {product}", PCM: "• Stock for {product}"},
+    "summary_set_stock": {
+        FR: "• En stock : {product}, {count}",
+        EN: "• In stock: {product}, {count}",
+        PCM: "• For stock: {product}, {count}",
+    },
     "price_unknown": {FR: "prix ?", EN: "price?", PCM: "price?"},
     "summary_total": {FR: "Total : {total}", EN: "Total: {total}", PCM: "Total: {total}"},
     "summary_total_partial": {
@@ -271,31 +305,48 @@ def _action_lines(result: ActionResult, language: Language) -> list[str]:
             "sold": "vendus" if _is_plural(result.quantity, FR) else "vendu",
             "added": "ajoutés" if _is_plural(result.quantity, FR) else "ajouté",
         }
-        if result.action == Action.SALE:
-            lines.append(_t("sale" if result.total is not None else "sale_no_price", language, **values))
+        remaining = _t("remaining", language, stock=stock) if stock is not None else ""
+        if result.action == Action.SALE or (result.action == Action.CREDIT_SALE and not result.customer):
+            lines.append(_t("sale" if result.total is not None else "sale_no_price", language, **values) + remaining)
         elif result.action == Action.CREDIT_SALE:
-            if result.customer:
-                key = "credit_sale" if result.total is not None else "credit_sale_no_price"
-                lines.append(_t(key, language, **values))
-            else:
-                lines.append(_t("sale" if result.total is not None else "sale_no_price", language, **values))
+            key = "credit_sale" if result.total is not None else "credit_sale_no_price"
+            lines.append(_t(key, language, **values) + remaining)
         elif result.action == Action.PURCHASE:
             lines.append(_t("purchase", language, **values))
+        elif result.action == Action.SET_STOCK:
+            lines.append(_t("set_stock", language, product=_capitalized(result.product), stock=_stock_text(result, language)))
         elif result.action == Action.DEBT_PAYMENT:
             lines.append(_t("payment", language, **values))
         if result.customer_balance is not None and result.action in (Action.CREDIT_SALE, Action.DEBT_PAYMENT):
             lines.append(_balance_line(result, language))
     elif result.action == Action.STOCK_CHECK and result.stock is not None:
-        unit = "" if is_generic_unit(result.unit) else f" {_plural(result.unit, result.stock, language)}"
-        lines.append(_t("stock_check", language, product=result.product[:1].upper() + result.product[1:], stock=stock + unit))
+        lines.append(_t("stock_check", language, product=_capitalized(result.product), stock=_stock_text(result, language)))
 
     for warning in result.warnings:
         if warning == LedgerWarning.NOT_UNDERSTOOD:
             continue  # handled once for the whole message
         lines.append(
-            _t(warning, language, product=result.product or "", stock=stock, customer=result.customer or "")
+            _t(
+                warning, language, product=result.product or "", stock=stock, customer=result.customer or "",
+                of_product=_of(result.product or ""),
+            )
         )
     return lines
+
+
+def _capitalized(name: str) -> str:
+    """First letter only: "savon Azur" -> "Savon Azur" (str.capitalize would give "Savon azur")."""
+    return name[:1].upper() + name[1:]
+
+
+def _stock_text(result: ActionResult, language: Language) -> str:
+    stock = format_quantity(result.stock, language)
+    return stock if is_generic_unit(result.unit) else f"{stock} {_plural(result.unit, result.stock, language)}"
+
+
+def _of(product: str) -> str:
+    """French "de savon" / "d'huile"."""
+    return f"d'{product}" if product[:1].lower() in "aeiouhâéèêîôœ" and product else f"de {product}"
 
 
 def confirmation(result: LedgerResult) -> str:
@@ -352,6 +403,9 @@ def _summary_line(action: ExtractedAction, language: Language) -> str | None:
         return None
     if action.action == Action.STOCK_CHECK:
         return _t("summary_stock_check", language, product=action.product or "?")
+    if action.action == Action.SET_STOCK:
+        count = quantity_with_unit(action.quantity, action.unit, language) if action.quantity is not None else "?"
+        return _t("summary_set_stock", language, product=action.product or "?", count=count)
     amount = _line_amount(action)
     amount_text = format_amount(amount) if amount is not None else _t("price_unknown", language)
     if action.action == Action.DEBT_PAYMENT:
@@ -405,3 +459,14 @@ def photo_too_large(language: Language) -> str:
 
 def photo_failed(language: Language) -> str:
     return _t("photo_failed", language)
+
+
+def product_choice(choice: ProductChoice, language: Language) -> str:
+    """"🤔 Quel savon : Azur ou Palmida ?"."""
+    labels = products.option_labels(choice.query, choice.options)
+    options = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + f" {_t('or', language)} {labels[-1]}"
+    return _t("choose_product", language, query=products.query_label(choice.query, choice.options), options=options)
+
+
+def welcome(language: Language, greeting: str) -> str:
+    return _t("welcome", language, greeting=greeting)

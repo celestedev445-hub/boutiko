@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from app.models import Customer, Debt, Language, MovementKind, Product, Sale, Shop, StockMovement
+from app.models import Customer, Debt, Language, MovementKind, Product, Sale, Shop, StockMovement, current_stock
 from app.schemas import Action, ExtractedAction, Extraction
 from app.services.ledger import LedgerWarning, apply_extraction
 from app.services.normalize import normalize_name
@@ -194,7 +194,7 @@ def test_known_sale_price_is_reused(session):
     apply(session, {"action": "sale", "product": "savon", "quantity": 1, "price": 250})
     result = apply(session, {"action": "sale", "product": "savon", "quantity": 4})
     assert result.actions[0].total == 1000
-    assert result.actions[0].warnings == [LedgerWarning.NEGATIVE_STOCK]
+    assert result.actions[0].warnings == []  # the stock question was asked on the first sale
 
 
 def test_new_price_updates_sale_price(session):
@@ -211,7 +211,7 @@ def test_missing_price_is_recorded_with_warning(session):
     assert LedgerWarning.MISSING_PRICE in action.warnings
     sale = session.scalar(select(Sale))
     assert (sale.unit_price, sale.total) == (None, None)
-    assert count(session, StockMovement) == 1
+    assert count(session, StockMovement) == 0  # stock not followed yet
 
 
 def test_credit_sale_without_price_has_no_debt(session):
@@ -260,11 +260,58 @@ def test_missing_quantity_or_product_is_not_recorded(session):
 
 
 def test_negative_stock_is_recorded_with_warning(session):
-    result = apply(session, {"action": "sale", "product": "savon", "quantity": 2, "price": 250})
+    apply(session, {"action": "purchase", "product": "savon", "quantity": 1})
+    result = apply(session, {"action": "sale", "product": "savon", "quantity": 3, "price": 250})
     action = result.actions[0]
     assert action.recorded
     assert action.stock == Decimal(-2)
     assert action.warnings == [LedgerWarning.NEGATIVE_STOCK]
+
+
+def test_sale_with_unknown_stock_never_goes_negative(session):
+    first = apply(session, {"action": "sale", "product": "savon", "quantity": 3, "price": 250})
+    second = apply(session, {"action": "sale", "product": "savons", "quantity": 2, "price": 250})
+
+    assert [a.recorded for a in first.actions + second.actions] == [True, True]
+    assert first.actions[0].stock is None
+    assert first.actions[0].warnings == [LedgerWarning.STOCK_UNKNOWN]
+    assert second.actions[0].warnings == []  # asked once per product
+    assert count(session, Sale) == 2
+    assert count(session, StockMovement) == 0
+    product = session.scalar(select(Product))
+    assert (product.stock_known, product.stock_hint_sent) == (False, True)
+    assert current_stock(session, product.id) == 0
+
+
+def test_purchase_starts_following_the_stock(session):
+    apply(session, {"action": "sale", "product": "savon", "quantity": 3, "price": 250})
+    apply(session, {"action": "purchase", "product": "savon", "quantity": 10})
+    result = apply(session, {"action": "sale", "product": "savon", "quantity": 2, "price": 250})
+    assert result.actions[0].stock == Decimal(8)
+    assert session.scalar(select(Product)).stock_known
+
+
+def test_set_stock(session):
+    apply(session, {"action": "sale", "product": "savon", "quantity": 3, "price": 250})
+    result = apply(session, {"action": "set_stock", "product": "savons", "quantity": 20})
+    action = result.actions[0]
+    assert (action.recorded, action.stock) == (True, Decimal(20))
+    product = session.scalar(select(Product))
+    assert product.stock_known
+    assert current_stock(session, product.id) == 20
+
+    apply(session, {"action": "sale", "product": "savon", "quantity": 5, "price": 250})
+    result = apply(session, {"action": "set_stock", "product": "savon", "quantity": 12})  # counted again
+    assert result.actions[0].stock == Decimal(12)
+    movements = session.scalars(select(StockMovement.quantity).order_by(StockMovement.id)).all()
+    assert movements == [Decimal(20), Decimal(-5), Decimal(-3)]  # adjustment, sale, adjustment
+
+
+def test_stock_check_on_product_with_unknown_stock(session):
+    apply(session, {"action": "sale", "product": "savon", "quantity": 3, "price": 250})
+    result = apply(session, {"action": "stock_check", "product": "savon"})
+    assert result.actions[0].stock is None
+    assert result.actions[0].warnings == [LedgerWarning.STOCK_UNKNOWN]
 
 
 # --- idempotence ---
@@ -277,7 +324,6 @@ def test_same_message_is_applied_once(session):
     assert second.duplicate
     assert second.actions == []
     assert count(session, Sale) == 1
-    assert count(session, StockMovement) == 1
 
 
 def test_failed_message_is_rolled_back(session, monkeypatch):

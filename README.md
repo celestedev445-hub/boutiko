@@ -114,11 +114,11 @@ sequenceDiagram
 1. **Extraction** ([`app/meta_client.py`](app/meta_client.py)). The message goes to `chat.completions` with a strict `json_schema` response format generated from the Pydantic model (`strict_json_schema` in `app/schemas.py`: every object closed, every field required, optional fields nullable) and `reasoning_effort="low"`. Timeout 60 s, one retry on network errors and 5xx. The prompt has short examples in French, English and Pidgin, and one rule above all: **never calculate or invent a value** the merchant didn't say.
 2. **Ledger** ([`app/services/ledger.py`](app/services/ledger.py)). `apply_extraction` records the whole message in one transaction:
    - the shop is created on the first message (provisional name = phone number, detected language);
-   - products and customers are matched by a normalized name (lowercase, no accents, simple singular: *Savons*, *savon* and *SAVON* are one product);
-   - `sale` → sale + negative stock movement; `credit_sale` → the same, on credit, + positive debt; `purchase` → positive stock movement (with unit cost); `debt_payment` → negative debt; `stock_check` → read only;
+   - products are matched without creating duplicates (see [Products and stock](#products-and-stock)); customers by a normalized name;
+   - `sale` → sale + negative stock movement (if the stock is followed); `credit_sale` → the same, on credit, + positive debt; `purchase` → positive stock movement (with unit cost); `set_stock` → adjustment to the count the merchant gives; `debt_payment` → negative debt; `stock_check` → read only, never creates a product;
    - prices: a stated **total** wins (unit price = total ÷ quantity, rounded); otherwise **unit price × quantity**; otherwise the product's last known sale price; otherwise the sale is still recorded and flagged *missing price*. A stated sale price becomes the product's current price;
    - a message id is applied only once (`processed_messages` table), even after a restart;
-   - stock may go negative: it's recorded, and the merchant is told kindly.
+   - a followed stock may go negative: it's recorded, and the merchant is told kindly.
 3. **Reply** ([`app/services/replies.py`](app/services/replies.py)). One short line per action, in the language of the message (`fr`, `en`, `pcm`), amounts written as `25 000 FCFA`:
 
    ```
@@ -127,19 +127,39 @@ sequenceDiagram
    📦 Savon : 18 en stock.
    ```
 
-   If nothing is understood, Boutiko asks the merchant to rephrase, with an example. If the Meta API fails, it answers *"Je n'ai pas pu lire ton message, réessaie dans un instant"* and logs the error.
+   If nothing is understood, Boutiko asks the merchant to rephrase, with an example. If the Meta API fails, it answers *"Je n'ai pas pu lire ton message, réessaie dans un instant"* and logs the error. A message that is just a greeting (*bonjour, salut, hello, how far*) gets a welcome for the time of day (*👋 Bonsoir ! Envoie-moi tes ventes…*) without calling the model.
 
 ### Evaluating the extraction
 
-[`tests/data/phrases.json`](tests/data/phrases.json) holds 30 realistic shop messages (12 French, 9 English, 9 Pidgin: unit prices, totals, credit, repayments, several actions in one message) with the expected extraction. [`scripts/eval_extraction.py`](scripts/eval_extraction.py) sends each one to the real API and prints OK/KO per phrase and the overall score:
+[`tests/data/phrases.json`](tests/data/phrases.json) holds 33 realistic shop messages (13 French, 10 English, 10 Pidgin: unit prices, totals, credit, repayments, stock counts, several actions in one message) with the expected extraction. [`scripts/eval_extraction.py`](scripts/eval_extraction.py) sends each one to the real API and prints OK/KO per phrase and the overall score:
 
 ```bash
-python scripts/eval_extraction.py              # all 30 phrases
+python scripts/eval_extraction.py              # all 33 phrases
 python scripts/eval_extraction.py --lang pcm   # only Pidgin
 python scripts/eval_extraction.py --id 10 -v   # one phrase, with the model output
 ```
 
 It reads `MODEL_API_KEY` from `.env`, makes one API call per phrase, and is **not** run by `pytest` (pytest only checks the dataset and the scorer). Product and customer names match when one normalized name contains the other; units are shown but not scored; language detection is scored separately.
+
+### Products and stock
+
+Merchants name the same product in many ways. [`app/services/products.py`](app/services/products.py) keeps one product per real product:
+
+- **Product key** ([`app/services/normalize.py`](app/services/normalize.py)): case, accents, simple French/English plurals (*s*, *x*, *es*), articles (*le, la, les, de, du, des, d', the*) and generic units (*pièce, pcs, unité*) are ignored. *savons*, *Savon Azur* and *3 pièces de savons Azur* give `savon` / `savon azur`.
+- **Matching**: same key → same product. Otherwise, if exactly one product's words are contained in the name (or the other way round), it is that product, and it takes the more precise name (*savon* becomes *Savon Azur*). If several could match (*savon* with *Savon Azur* and *Savon Palmida*), nothing is recorded and Boutiko asks **"🤔 Quel savon : Azur ou Palmida ?"** (en/pcm too). The question is kept as a pending action; the answer (*Azur*, *palmida*, *2*) records the message with that product, without calling the model again; *non* / *cancel* drops it.
+- **The model reuses names**: the shop's 50 most used product names are sent with every text, voice and photo extraction, with the instruction to write one of them exactly when it is the same product.
+- **Not products**: words for the shop itself (*shop, boutique, magasin, comptoir, store*) are excluded in the prompt, and the ledger refuses to create a product named *shop(s), boutique(s), magasin(s), store(s), stock, produit(s), article(s), chose(s)* or shorter than 2 letters: it asks which product was meant instead. A stock question about an unknown product never creates one: *"Je ne connais pas encore X. Envoie un achat pour l'ajouter."*
+- **Known stock**: a product's stock is only followed once it has a starting point, a purchase or a count (*"j'ai 20 savons en stock"*, the `set_stock` action). Until then, its sales are recorded but don't touch the stock (no *"Reste : -3"*), and the merchant is asked once: *"💡 Dis-moi combien tu as de savons en stock pour que je le suive."* Products whose stock isn't followed never show as low or out of stock in the summary.
+
+Existing duplicates can be listed and merged per shop (sales and stock movements move to the kept product, debts follow their sales, stocks add up, in one transaction):
+
+```bash
+python scripts/merge_products.py 237690001234            # list
+python scripts/merge_products.py 237690001234 --apply    # merge
+docker compose exec api python scripts/merge_products.py 237690001234   # with Docker
+```
+
+Migration `0005` marks the stock as known for every product that was ever bought, brings the negative stock of the others back to 0 (with an adjustment movement), and recomputes the product keys; a key already taken in the shop is left for `merge_products.py`.
 
 ## Voice notes
 
@@ -232,7 +252,7 @@ It prints the image kind, the actions read, the clarification question if any, t
 Every evening, the merchant gets a short message about their day:
 
 ```
-🌙 Bilan du mardi 27 octobre
+🌙 Bonsoir ! Voici le bilan du mardi 27 octobre
 🛒 Ventes : 6 pour 52 300 FCFA (dont 2 à crédit : 4 500 FCFA)
 📈 Hier : 20 000 FCFA (+162 %)
 🏆 Top : savon Azur (6 · 1 500 FCFA), Maggi (3 · 300 FCFA), huile (3 bidons)
@@ -240,12 +260,12 @@ Every evening, the merchant gets a short message about their day:
 💵 Dettes encaissées : 500 FCFA · nouvelles dettes : 4 500 FCFA
 📝 On te doit en tout : 4 000 FCFA (2 clients)
 ⚠️ Stock bas : Maggi (2)
-❌ Épuisé : sucre, lait, huile
-💡 Pense à racheter du sucre demain : il est épuisé.
+❌ Épuisé : huile
+💡 Pense à racheter de l'huile demain : il n'en reste plus.
 ```
 
-1. **Figures** ([`app/services/summary.py`](app/services/summary.py)), computed from the ledger without any model, for the shop's local day (`SHOP_TIMEZONE`): number and total of sales (credit sales included), purchases, debts repaid and new debts, total still owed, top 3 products sold, low stock (`≤ LOW_STOCK_THRESHOLD`) and out of stock, and the change in sales since the day before. All amounts are integers in FCFA; the percentage is rounded with decimals, never floats.
-2. **Writing** ([`app/services/summary_text.py`](app/services/summary_text.py)): `MODEL_TEXT` (`reasoning_effort="low"`) gets the figures as JSON, every amount already written as `25 000 FCFA`, and the merchant's latest language. It writes 8 to 12 warm lines and **one** concrete piece of advice drawn from the figures. A guard then checks that every amount in the text (`52 300 FCFA`, `52.300 F`, `52 300`…) is one of the computed figures and that there's no shorthand like `52k`. If an amount was made up, or the model can't be reached, Boutiko sends a deterministic template (French, English or Pidgin) with the same figures and no advice. A day with nothing recorded gets a short encouraging message, without calling the model.
+1. **Figures** ([`app/services/summary.py`](app/services/summary.py)), computed from the ledger without any model, for the shop's local day (`SHOP_TIMEZONE`): number and total of sales (credit sales included), purchases, debts repaid and new debts, total still owed, top 3 products sold, low stock (`≤ LOW_STOCK_THRESHOLD`) and out of stock (only for products whose stock is followed), and the change in sales since the day before. All amounts are integers in FCFA; the percentage is rounded with decimals, never floats.
+2. **Writing** ([`app/services/summary_text.py`](app/services/summary_text.py)): `MODEL_TEXT` (`reasoning_effort="low"`) gets the figures as JSON, every amount already written as `25 000 FCFA`, the merchant's latest language and the greeting for the shop's local time (*Bonjour* before noon, *Bon après-midi* until 18:00, *Bonsoir* after; *Good morning / afternoon / evening* in English and Pidgin), which it must use and no other. It writes 8 to 12 warm lines and **one** concrete piece of advice drawn from the figures. A text with the wrong greeting is replaced by the template, like one with a wrong amount. A guard then checks that every amount in the text (`52 300 FCFA`, `52.300 F`, `52 300`…) is one of the computed figures and that there's no shorthand like `52k`. If an amount was made up, or the model can't be reached, Boutiko sends a deterministic template (French, English or Pidgin) with the same figures and no advice. A day with nothing recorded gets a short encouraging message, without calling the model.
 3. **Sending** ([`app/services/daily.py`](app/services/daily.py)):
    - **On request**: a text or voice message that is just *résumé*, *bilan*, *point du jour*, *summary*, *today summary* or *how market go today* gets the day's summary right away, without going through extraction.
    - **Automatically**: a loop started with the API (FastAPI lifespan) checks every 15 minutes. Once the shop's local time is past its summary hour (`SUMMARY_HOUR`, or the shop's own), the summary is sent if it hasn't been yet that day (automatically or on request), **and** if the merchant's last message is less than 23 h 30 old. Each send is recorded in `daily_summaries` (one row per shop, day and channel `auto` / `manual`), and the row is claimed before sending, so a summary is never sent twice.
@@ -278,6 +298,8 @@ app/
     ledger.py        extraction -> sales, stock movements, debts
     replies.py       confirmations in fr / en / pcm
     normalize.py     product and customer name keys
+    products.py      product matching, "which one?" questions, duplicates
+    greetings.py     greeting by the time of day, welcome messages
     audio.py         voice note -> WAV 16 kHz mono (ffmpeg)
     transcribe.py    speech-to-text with Meta models, with fallback
     vision.py        photo reading with a Meta vision model
@@ -298,6 +320,7 @@ scripts/
   eval_voice.py      transcription accuracy against the real API
   eval_vision.py     photo reading accuracy against the real API
   demo_summary.py    show (or send) a shop's evening summary
+  merge_products.py  list and merge a shop's duplicate products
 tests/               pytest suite (Meta API, Graph API and ffmpeg mocked, SQLite)
   data/phrases.json  evaluation dataset
   data/voice/        your recordings for eval_voice.py (git-ignored)

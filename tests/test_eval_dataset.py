@@ -11,9 +11,9 @@ phrases = json.loads(PHRASES.read_text(encoding="utf-8"))
 
 
 def test_dataset_size_and_languages():
-    assert len(phrases) == 30
-    assert len({p["id"] for p in phrases}) == 30
-    assert Counter(p["language"] for p in phrases) == {"fr": 12, "en": 9, "pcm": 9}
+    assert len(phrases) == 33
+    assert len({p["id"] for p in phrases}) == 33
+    assert Counter(p["language"] for p in phrases) == {"fr": 13, "en": 10, "pcm": 10}
 
 
 def test_expected_actions_are_valid_extractions():

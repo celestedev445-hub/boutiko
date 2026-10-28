@@ -18,6 +18,7 @@ class Action(str, Enum):
     CREDIT_SALE = "credit_sale"  # sale on credit -> creates a debt
     DEBT_PAYMENT = "debt_payment"  # customer pays back part of a debt
     STOCK_CHECK = "stock_check"  # "combien de savons il me reste ?"
+    SET_STOCK = "set_stock"  # "j'ai 20 savons en stock": the merchant counted
     UNKNOWN = "unknown"
 
 

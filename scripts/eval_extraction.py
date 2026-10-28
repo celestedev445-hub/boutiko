@@ -5,7 +5,7 @@ compares the result with the expected actions. Not run by pytest: it needs
 MODEL_API_KEY (read from .env or the environment) and makes one API call per
 phrase.
 
-    python scripts/eval_extraction.py              # all 30 phrases
+    python scripts/eval_extraction.py              # all 33 phrases
     python scripts/eval_extraction.py --lang pcm   # only Pidgin
     python scripts/eval_extraction.py --id 10 -v   # one phrase, show the model output
 

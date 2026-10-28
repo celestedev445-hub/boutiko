@@ -70,5 +70,12 @@
   {"id": 29, "language": "pcm", "text": "Tanyi don pay 2000, e still go pay the rest",
    "expected": [{"action": "debt_payment", "customer": "Tanyi", "total_price": 2000}]},
   {"id": 30, "language": "pcm", "text": "I sell 2 crate beer",
-   "expected": [{"action": "sale", "product": "beer", "quantity": 2, "unit": "crate"}]}
+   "expected": [{"action": "sale", "product": "beer", "quantity": 2, "unit": "crate"}]},
+
+  {"id": 31, "language": "fr", "text": "j'ai compté, il me reste 18 savons Azur en stock",
+   "expected": [{"action": "set_stock", "product": "savons Azur", "quantity": 18}]},
+  {"id": 32, "language": "en", "text": "I have 7 bags of rice in stock right now",
+   "expected": [{"action": "set_stock", "product": "rice", "quantity": 7, "unit": "bag"}]},
+  {"id": 33, "language": "pcm", "text": "I get 24 tin milk for shop now",
+   "expected": [{"action": "set_stock", "product": "milk", "quantity": 24, "unit": "tin"}]}
 ]

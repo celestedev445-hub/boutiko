@@ -187,6 +187,8 @@ def build_daily_summary(session: Session, shop: Shop, day: date) -> DayFigures:
     threshold = Decimal(settings.low_stock_threshold)
     for product_id, total in sorted(stock_rows, key=lambda row: (_decimal(row[1]), products[row[0]].name)):
         product = products[product_id]
+        if not product.stock_known:  # never counted or bought: no false "out of stock"
+            continue
         figure = StockFigure(
             name=product.name, unit=None if is_generic_unit(product.unit) else product.unit, stock=_decimal(total)
         )

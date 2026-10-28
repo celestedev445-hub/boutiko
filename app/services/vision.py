@@ -39,10 +39,13 @@ image_kind and what to extract:
   (sale, credit_sale, purchase, debt_payment).
 - product: a photo of goods -> the caption decides: "vendu 3 à 500" is a sale of
   3 at 500, "j'ai reçu 2 cartons" a purchase, "il me reste combien ?" a
-  stock_check. Name the product from what you see (brand and product, e.g.
+  stock_check, "j'en ai 20" a set_stock (quantity 20: what the merchant has now). Name the product from what you see (brand and product, e.g.
   "Savon Azur"). Without a caption: no action, and needs_clarification asks
   briefly what to do (sold? bought? check the stock?).
 - other: anything else -> no action.
+
+Words naming the shop itself (shop, boutique, magasin, comptoir, store) are never
+products.
 
 The golden rule: never invent, calculate or guess a value. If a quantity or a
 price is unreadable, cut off or missing, leave it null and say which one in
@@ -81,13 +84,16 @@ def _instruction(caption: str | None, language: Language) -> str:
     return "\n".join(lines)
 
 
-def analyze_image(image: bytes, mime_type: str, caption: str | None, language: Language) -> VisionExtraction:
+def analyze_image(
+    image: bytes, mime_type: str, caption: str | None, language: Language, known_products: list[str] | None = None
+) -> VisionExtraction:
     model = get_settings().model_vision
     data_url = f"data:{mime_type};base64,{base64.b64encode(image).decode()}"
     kwargs = dict(
         model=model,
         messages=[
             {"role": "system", "content": VISION_PROMPT},
+            *meta_client.known_products_message(known_products),
             {
                 "role": "user",
                 "content": [

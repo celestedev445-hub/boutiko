@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import clock, meta_client
-from app.models import DailySummary, Language, Shop, SummaryChannel
+from app.models import DailySummary, Language, MovementKind, Product, Shop, StockMovement, SummaryChannel
 from app.schemas import ExtractedAction, Extraction
 from app.services import daily, ledger
 from app.services.summary import build_daily_summary
@@ -42,14 +42,18 @@ def now(monkeypatch):
 
 @pytest.fixture
 def writer(monkeypatch):
-    """The summary-writing model. state.text: what it returns (or an exception)."""
+    """The summary-writing model. state.text: what it returns, an exception, or {language name: text}."""
     state = SimpleNamespace(text="", calls=[])
 
     def create_completion(**kwargs):
         state.calls.append(kwargs)
         if isinstance(state.text, Exception):
             raise state.text
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=state.text))])
+        text = state.text
+        if isinstance(text, dict):
+            prompt = kwargs["messages"][0]["content"]
+            text = next(t for name, t in text.items() if f"Write in {name}." in prompt)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
 
     monkeypatch.setattr(meta_client, "create_completion", create_completion)
     return state
@@ -60,7 +64,7 @@ def extractor(monkeypatch):
     """Text extraction: records texts; returns an 'unknown' action."""
     state = SimpleNamespace(texts=[])
 
-    def extract(text):
+    def extract(text, known_products=None):
         state.texts.append(text)
         return Extraction(actions=[ExtractedAction(action="unknown")], language="fr")
 
@@ -130,10 +134,9 @@ def test_daily_figures(session, busy_day):
         ("huile", "bidon", Decimal(3), 0),
     ]
     assert [(s.name, s.stock) for s in figures.low_stock] == [("Maggi", Decimal(2))]
-    # pagne was sold yesterday without any purchase recorded: -1
-    assert [(s.name, s.stock) for s in figures.out_of_stock] == [
-        ("sucre", Decimal(-2)), ("lait", Decimal(-1)), ("pagne", Decimal(-1)), ("huile", Decimal(0))
-    ]
+    # sucre, lait and pagne were sold without any purchase or count: their stock isn't
+    # followed, so they are never reported as out of stock. huile was bought, then sold out.
+    assert [(s.name, s.stock) for s in figures.out_of_stock] == [("huile", Decimal(0))]
     assert figures.yesterday_sales_total == 20000
     assert figures.sales_change == 32300
     assert figures.sales_change_percent == 162  # 161.5 rounded half up, no float
@@ -171,12 +174,17 @@ def test_no_previous_day_means_no_percentage(session, now):
 
 
 MODEL_TEXT = (
-    "🌙 Belle journée !\n"
+    "🌙 Bonsoir ! Belle journée aujourd'hui.\n"
     "🛒 6 ventes pour 52 300 FCFA, dont 4 500 FCFA à crédit.\n"
     "📈 Hier : 20 000 FCFA, soit 32 300 FCFA de plus.\n"
     "📝 Paul te doit 3 000 FCFA.\n"
-    "💡 Pense à racheter du sucre demain."
+    "💡 Pense à racheter de l'huile demain."
 )
+MODEL_TEXTS = {
+    "French": MODEL_TEXT,
+    "English": "🌙 Good evening! 6 sales for 52 300 FCFA today.\n💡 Restock the oil tomorrow.",
+    "Cameroonian Pidgin English": "🌙 Good evening! You sell 6 times, 52 300 FCFA.\n💡 Buy oil tomorrow.",
+}
 
 
 def test_model_text_is_used_when_amounts_check_out(session, busy_day, writer):
@@ -189,10 +197,12 @@ def test_model_text_is_used_when_amounts_check_out(session, busy_day, writer):
     assert call["model"] == "muse-spark-1.3-contributor"
     assert call["reasoning_effort"] == "low"
     assert "Write in French." in call["messages"][0]["content"]
+    assert 'Start with exactly this greeting: "Bonsoir".' in call["messages"][0]["content"]
     payload = call["messages"][1]["content"]
+    assert '"greeting": "Bonsoir"' in payload
     assert '"total_text": "52 300 FCFA"' in payload
     assert '"name": "Paul"' in payload
-    assert '"out_of_stock": ["sucre", "lait", "pagne", "huile"]' in payload
+    assert '"out_of_stock": ["huile"]' in payload
 
 
 def test_invented_amount_falls_back_to_template(session, busy_day, writer, caplog):
@@ -239,7 +249,7 @@ def test_template_has_every_figure_and_no_advice(session, busy_day, language):
 
 def test_template_french(session, busy_day):
     assert template(build_daily_summary(session, busy_day, TODAY), Language.FR) == (
-        "🌙 Bilan du mardi 27 octobre\n"
+        "🌙 Bonsoir ! Voici le bilan du mardi 27 octobre\n"
         "🛒 Ventes : 6 pour 52 300 FCFA (dont 2 à crédit : 4 500 FCFA) · 1 sans prix\n"
         "📈 Hier : 20 000 FCFA (+162 %)\n"
         "🏆 Top : savon Azur (6 · 1 500 FCFA), Maggi (3 · 300 FCFA), huile (3 bidons)\n"
@@ -247,17 +257,92 @@ def test_template_french(session, busy_day):
         "💵 Dettes encaissées : 500 FCFA · nouvelles dettes : 4 500 FCFA\n"
         "📝 On te doit en tout : 4 000 FCFA (2 clients)\n"
         "⚠️ Stock bas : Maggi (2)\n"
-        "❌ Épuisé : sucre, lait, pagne, huile\n"
+        "❌ Épuisé : huile\n"
         "Bonne soirée ! 🙏"
     )
+
+
+def test_unknown_stock_is_never_out_of_stock(session, now):
+    record(session, {"action": "sale", "product": "savon", "quantity": 5, "price": 250})
+    record(session, {"action": "purchase", "product": "riz", "quantity": 2, "unit": "sac"})
+    record(session, {"action": "sale", "product": "riz", "quantity": 2, "unit": "sac", "price": 23000})
+    figures = build_daily_summary(session, shop_of(session), TODAY)
+    assert [s.name for s in figures.out_of_stock] == ["riz"]
+    assert figures.low_stock == []
+
+    # Older data: movements on a product whose stock was never counted.
+    savon = session.scalar(select(Product).where(Product.name == "savon"))
+    session.add(StockMovement(shop_id=savon.shop_id, product_id=savon.id, kind=MovementKind.SALE, quantity=-5,
+                              occurred_at=local(TODAY, 11)))
+    session.commit()
+    assert [s.name for s in build_daily_summary(session, shop_of(session), TODAY).out_of_stock] == ["riz"]
+
+
+# --- greeting by the time of day ---
+
+
+@pytest.mark.parametrize(
+    ("hour", "fr", "en", "emoji", "closing"),
+    [
+        (9, "Bonjour", "Good morning", "☀️", "Bonne journée ! 🙏"),
+        (14, "Bon après-midi", "Good afternoon", "🌤️", "Bonne fin de journée ! 🙏"),
+        (20, "Bonsoir", "Good evening", "🌙", "Bonne soirée ! 🙏"),
+    ],
+)
+def test_greeting_follows_the_shop_time(session, busy_day, now, hour, fr, en, emoji, closing):
+    now.value = local(TODAY, hour)
+    figures = build_daily_summary(session, busy_day, TODAY)
+    text = template(figures, Language.FR)
+    assert text.startswith(f"{emoji} {fr} ! Voici le bilan du mardi 27 octobre\n")
+    assert text.endswith(closing)
+    assert template(figures, Language.EN).startswith(f"{emoji} {en}! Here's your summary")
+    assert template(figures, Language.PIDGIN).startswith(f"{emoji} {en}! See how market go")
+
+
+def test_greeting_boundaries_in_shop_time_zone(now):
+    from app.services.greetings import Period, period
+
+    for (hour, minute), expected in {
+        (11, 59): Period.MORNING, (12, 0): Period.AFTERNOON, (17, 59): Period.AFTERNOON, (18, 0): Period.EVENING,
+    }.items():
+        now.value = local(TODAY, hour, minute)
+        assert period() == expected
+
+
+def test_model_with_another_greeting_falls_back_to_template(session, busy_day, writer, now, caplog):
+    now.value = local(TODAY, 20, 30)
+    writer.text = MODEL_TEXT.replace("Bonsoir", "Bonjour")
+    figures = build_daily_summary(session, busy_day, TODAY)
+    assert write_summary(figures, Language.FR) == template(figures, Language.FR)
+    assert "wrong or missing greeting" in caplog.text
+
+    writer.text = MODEL_TEXT + "\nBonjour à demain !"
+    assert write_summary(figures, Language.FR) == template(figures, Language.FR)
+
+
+@pytest.mark.parametrize(
+    ("hour", "text", "start"),
+    [
+        (9, "bonjour", "👋 Bonjour ! Envoie-moi tes ventes"),
+        (14, "Salut !", "👋 Bon après-midi ! Envoie-moi tes ventes"),
+        (20, "hello", "👋 Good evening! Send me your sales"),
+        (20, "how far", "👋 Good evening! Send me your sales, wetin you buy"),
+    ],
+)
+def test_welcome_message(client, sent, session_factory, now, extractor, writer, hour, text, start):
+    now.value = local(TODAY, hour)
+    send(client, text)
+    assert sent[-1][1].startswith(start)
+    assert extractor.texts == []
+    assert writer.calls == []
 
 
 @pytest.mark.parametrize(
     ("language", "start"),
     [
-        (Language.FR, "🌙 Bilan du mardi 27 octobre : aucune opération enregistrée."),
-        (Language.EN, "🌙 Summary for Tuesday 27 October: nothing recorded."),
-        (Language.PIDGIN, "🌙 How market go for Tuesday 27 October: nothing recorded."),
+        (Language.FR, "☀️ Bonjour ! Bilan du mardi 27 octobre : aucune opération enregistrée."),
+        (Language.EN, "☀️ Good morning! Summary for Tuesday 27 October: nothing recorded."),
+        (Language.PIDGIN, "☀️ Good morning! How market go for Tuesday 27 October: nothing recorded."),
     ],
 )
 def test_empty_day_is_short_and_needs_no_model(session, now, writer, language, start):
@@ -281,11 +366,11 @@ def send(client, body: str, message_id: str | None = None):
      ("summary", "English"), ("Today summary please", "English"), ("how market go today", "Cameroonian Pidgin English")],
 )
 def test_summary_request_sends_summary_without_extraction(client, sent, session_factory, busy_day, writer, extractor, text, language):
-    writer.text = MODEL_TEXT
+    writer.text = MODEL_TEXTS
     send(client, text)
 
     assert extractor.texts == []
-    assert sent[-1][1] == MODEL_TEXT
+    assert sent[-1][1] == MODEL_TEXTS[language]
     assert f"Write in {language}." in writer.calls[0]["messages"][0]["content"]
     with session_factory() as session:
         row = session.scalar(select(DailySummary))
@@ -438,21 +523,21 @@ def skipped(session_factory, session, evening, now):
 
 def test_skipped_summary_offered_next_morning(client, sent, session_factory, skipped, now, extractor, writer):
     now.value = local(date(2026, 10, 28), 8, 30)
-    send(client, "bonjour")
+    send(client, "le marché est calme")
 
     reply = sent[-1][1]
     assert reply.startswith("🤔")  # the normal reply first
     assert reply.endswith("\n\n💡 Tape RÉSUMÉ pour voir le bilan d'hier.")
 
     # The offer is made once.
-    send(client, "salut")
+    send(client, "toujours calme")
     assert "RÉSUMÉ" not in sent[-1][1]
 
     # RÉSUMÉ before noon shows yesterday's day.
     # model down: the template shows which day is summarized
     writer.text = openai.APIConnectionError(request=httpx.Request("POST", "https://api.meta.ai/v1/chat/completions"))
     send(client, "RÉSUMÉ")
-    assert sent[-1][1].startswith("🌙 Bilan du mardi 27 octobre\n🛒 Ventes : 6 pour 52 300 FCFA")
+    assert sent[-1][1].startswith("☀️ Bonjour ! Voici le bilan du mardi 27 octobre\n🛒 Ventes : 6 pour 52 300 FCFA")
     with session_factory() as session:
         row = session.scalar(select(DailySummary))
         assert (row.day, row.channel) == (TODAY, SummaryChannel.MANUAL)
@@ -460,7 +545,8 @@ def test_skipped_summary_offered_next_morning(client, sent, session_factory, ski
 
 def test_skipped_summary_offered_same_evening_and_not_auto_sent(client, sent, session_factory, skipped, now, extractor):
     now.value = local(TODAY, 21, 0)
-    send(client, "bonsoir")
+    send(client, "bonsoir")  # the welcome message, then the offer
+    assert sent[-1][1].startswith("👋 Bonsoir !")
     assert sent[-1][1].endswith("\n\n💡 Tape RÉSUMÉ pour voir le bilan du jour.")
 
     # The window is open again, but the offer stands in for the automatic summary.
@@ -470,7 +556,7 @@ def test_skipped_summary_offered_same_evening_and_not_auto_sent(client, sent, se
 
 def test_skipped_summary_not_offered_after_noon_next_day(client, sent, session_factory, skipped, now, extractor):
     now.value = local(date(2026, 10, 28), 12, 30)
-    send(client, "bonjour")
+    send(client, "le marché est calme")
     assert "RÉSUMÉ" not in sent[-1][1]
     with session_factory() as session:
         assert shop_of(session).summary_skipped_day is None
@@ -478,7 +564,7 @@ def test_skipped_summary_not_offered_after_noon_next_day(client, sent, session_f
 
 def test_inbound_message_updates_the_window(client, sent, session_factory, now, extractor):
     now.value = local(TODAY, 9, 15)
-    send(client, "bonjour")
+    send(client, "le marché est calme")
     with session_factory() as session:
         assert clock.as_utc(shop_of(session).last_message_at) == local(TODAY, 9, 15)
 

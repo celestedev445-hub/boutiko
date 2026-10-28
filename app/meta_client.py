@@ -42,7 +42,12 @@ Actions:
 - debt_payment: a customer pays back money they owe; put the amount in total_price
 - purchase: goods bought from a supplier to restock
 - stock_check: the merchant asks how much of a product is left
+- set_stock: the merchant says how many they have right now ("j'ai 20 savons en
+  stock"): quantity is that count
 - unknown: anything else (greetings, questions you can't map)
+
+Products: words naming the shop itself (shop, boutique, magasin, comptoir,
+store) are never products: "how many soap remain for shop?" is about "soap".
 
 Prices: "price" is the price of ONE unit; "total_price" is the amount for the
 whole line. Fill only the one the merchant actually says.
@@ -67,7 +72,20 @@ Examples (only the relevant fields shown; every other field is null):
 "Ekane don pay 5000 for wetin e owe" -> pcm; debt_payment, customer "Ekane", total_price 5000
 "how many soap remain?" -> en; stock_check, product "soap"
 "I buy 5 packet sugar" -> pcm; purchase, product "sugar", quantity 5, unit "packet" (no price said: price and total_price null)
+"j'ai 20 savons en stock" -> fr; set_stock, product "savons", quantity 20
+"I get 12 tin milk for shop now" -> pcm; set_stock, product "milk", quantity 12, unit "tin"
 "bonjour" -> fr; one unknown action"""
+
+KNOWN_PRODUCTS_PROMPT = """Products already recorded in this shop. When the merchant means one of
+them, write its name exactly as below, even if they spell it differently:
+{names}"""
+
+
+def known_products_message(names: list[str] | None) -> list[dict]:
+    """Extra system message listing the shop's products, so the model reuses their names."""
+    if not names:
+        return []
+    return [{"role": "system", "content": KNOWN_PRODUCTS_PROMPT.format(names="\n".join(f"- {n}" for n in names))}]
 
 
 class MissingAPIKeyError(RuntimeError):
@@ -109,12 +127,13 @@ def create_completion(**kwargs):
     return client.chat.completions.create(**kwargs)
 
 
-def _extract(user_content) -> Extraction:
+def _extract(user_content, known_products: list[str] | None = None) -> Extraction:
     try:
         response = create_completion(
             model=get_settings().model_text,
             messages=[
                 {"role": "system", "content": EXTRACTION_PROMPT},
+                *known_products_message(known_products),
                 {"role": "user", "content": user_content},
             ],
             response_format=extraction_response_format(),
@@ -130,8 +149,9 @@ def _extract(user_content) -> Extraction:
         raise ExtractionError(f"{type(exc).__name__}: {exc}") from exc
 
 
-def extract_from_text(text: str) -> Extraction:
-    return _extract(text)
+def extract_from_text(text: str, known_products: list[str] | None = None) -> Extraction:
+    """known_products: the shop's product names (most used first), reused when they match."""
+    return _extract(text, known_products)
 
 
 def count_shelf(image: bytes, product_hints: list[str]) -> dict[str, int]:

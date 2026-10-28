@@ -95,7 +95,7 @@ def text_model(monkeypatch):
     """Text extraction: records the texts it was asked about; returns an 'unknown' action."""
     state = {"texts": [], "extraction": Extraction.model_validate({"actions": [{"action": "unknown"}], "language": "fr"})}
 
-    def fake_extract(text):
+    def fake_extract(text, known_products=None):
         state["texts"].append(text)
         return state["extraction"]
 
@@ -280,7 +280,7 @@ def test_latest_pending_is_the_one_answered(setup):
 
     assert [r.status for r in pending_rows(t)] == [PendingStatus.PENDING, PendingStatus.CONFIRMED]
     assert count(t, Sale) == 1
-    assert count(t, StockMovement) == 1
+    assert count(t, StockMovement) == 0  # Savon Azur's stock isn't followed yet
 
 
 def test_other_merchants_yes_does_not_touch_my_pending(setup):
@@ -343,7 +343,8 @@ def test_product_photo_stock_question_is_answered_directly(setup):
     t.vision["outcomes"] = [reading("product", [{"action": "stock_check", "product": "Savon Azur"}], language="fr")]
     send_photo(t, caption="il me reste combien ?")
     assert pending_rows(t) == []
-    assert last_reply(t) == "📦 Je ne connais pas encore « Savon Azur ». Note un achat pour l'ajouter au stock."
+    assert last_reply(t) == "📦 Je ne connais pas encore « Savon Azur ». Envoie un achat pour l'ajouter."
+    assert count(t, Product) == 0
 
 
 def test_unreadable_price_is_flagged_in_the_summary(setup):

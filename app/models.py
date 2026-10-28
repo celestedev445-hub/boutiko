@@ -21,6 +21,7 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    false,
     func,
     select,
 )
@@ -52,6 +53,11 @@ class MovementKind(str, enum.Enum):
 class SummaryChannel(str, enum.Enum):
     AUTO = "auto"  # sent by the scheduler in the evening
     MANUAL = "manual"  # the merchant asked for it
+
+
+class PendingKind(str, enum.Enum):
+    CONFIRM = "confirm"  # actions read on a photo: waiting for YES / NO
+    CHOOSE_PRODUCT = "choose_product"  # "Quel savon : Azur ou Palmida ?": waiting for the answer
 
 
 class PendingStatus(str, enum.Enum):
@@ -95,9 +101,14 @@ class Product(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(120))  # as first written by the merchant
-    name_key: Mapped[str] = mapped_column(String(120))  # normalized, for lookups (see services.normalize)
+    name_key: Mapped[str] = mapped_column(String(120))  # normalize.product_key(name), for lookups
     unit: Mapped[str] = mapped_column(String(20), default="piece")
     sale_price: Mapped[int | None] = mapped_column(BigInteger)
+    # False until a purchase or an explicit count: sales then don't touch the stock,
+    # and the product never shows as low or out of stock.
+    stock_known: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The merchant was asked once to give this product's stock.
+    stock_hint_sent: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     shop: Mapped[Shop] = relationship(back_populates="products")
@@ -195,6 +206,9 @@ class PendingAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[PendingStatus] = mapped_column(_enum(PendingStatus), default=PendingStatus.PENDING)
+    kind: Mapped[PendingKind] = mapped_column(
+        _enum(PendingKind), default=PendingKind.CONFIRM, server_default=PendingKind.CONFIRM.value
+    )
 
 
 class DailySummary(Base):

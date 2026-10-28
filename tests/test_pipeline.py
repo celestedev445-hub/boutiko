@@ -17,7 +17,7 @@ def model(monkeypatch):
     """Set what the (mocked) model returns: an Extraction, or an exception to raise."""
     state = {"outcome": Extraction(), "texts": []}
 
-    def fake_extract(text):
+    def fake_extract(text, known_products=None):
         state["texts"].append(text)
         if isinstance(state["outcome"], Exception):
             raise state["outcome"]
@@ -45,8 +45,8 @@ def test_sale_message_is_recorded_and_confirmed(client, sent, session_factory, m
     assert send(client, "j'ai vendu 3 sacs de riz pour 25 000").status_code == 200
 
     assert state["texts"] == ["j'ai vendu 3 sacs de riz pour 25 000"]
-    assert sent == [(PHONE, "✅ 3 sacs de riz vendus, 25 000 FCFA. Reste : -3.\n"
-                            "⚠️ Le stock de riz est à -3. Pas grave : pense à noter tes achats pour le corriger.")]
+    assert sent == [(PHONE, "✅ 3 sacs de riz vendus, 25 000 FCFA.\n"
+                            "💡 Dis-moi combien tu as de riz en stock pour que je le suive.")]
     with session_factory() as session:
         assert session.scalar(select(Sale)).total == 25000
 
@@ -65,7 +65,7 @@ def test_reply_language_follows_the_message(client, sent, session_factory, model
 def test_unknown_message_asks_to_rephrase(client, sent, session_factory, model):
     returns, _, _ = model
     returns({"action": "unknown"})
-    send(client, "bonjour")
+    send(client, "ça va le marché ?")
     assert sent[0][1].startswith("🤔 Je n'ai pas compris. Écris par exemple")
 
 

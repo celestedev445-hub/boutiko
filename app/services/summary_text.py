@@ -13,6 +13,8 @@ import openai
 from app import meta_client
 from app.config import get_settings
 from app.models import Language
+from app.services import greetings
+from app.services.greetings import Period
 from app.services.replies import format_amount, format_quantity, quantity_with_unit
 from app.services.summary import DayFigures
 
@@ -35,8 +37,11 @@ _MONTHS = {
          "November", "December"],
 }
 
-SUMMARY_PROMPT = """You write the evening summary of a small shop in Cameroon, sent to the
+SUMMARY_PROMPT = """You write the daily summary of a small shop in Cameroon, sent to the
 shopkeeper on WhatsApp. Write in {language}.
+
+- Start with exactly this greeting: "{greeting}". Use no other greeting anywhere
+  in the message (it is {period} in Cameroon).
 
 - 8 to 12 short lines, warm and encouraging, a few simple emojis, no markdown
   headings, no tables.
@@ -52,7 +57,11 @@ shopkeeper on WhatsApp. Write in {language}.
 - Only the message text, nothing before or after it."""
 
 TEMPLATES: dict[str, dict[Language, str]] = {
-    "header": {FR: "🌙 Bilan du {day}", EN: "🌙 Summary for {day}", PCM: "🌙 How market go for {day}"},
+    "header": {
+        FR: "{emoji} {greeting} ! Voici le bilan du {day}",
+        EN: "{emoji} {greeting}! Here's your summary for {day}",
+        PCM: "{emoji} {greeting}! See how market go for {day}",
+    },
     "sales": {
         FR: "🛒 Ventes : {count} pour {total}",
         EN: "🛒 Sales: {count} for {total}",
@@ -76,11 +85,10 @@ TEMPLATES: dict[str, dict[Language, str]] = {
     },
     "low_stock": {FR: "⚠️ Stock bas : {items}", EN: "⚠️ Low stock: {items}", PCM: "⚠️ Stock don low: {items}"},
     "out_of_stock": {FR: "❌ Épuisé : {items}", EN: "❌ Out of stock: {items}", PCM: "❌ E don finish: {items}"},
-    "closing": {FR: "Bonne soirée ! 🙏", EN: "Have a good evening! 🙏", PCM: "Good evening o! 🙏"},
     "empty": {
-        FR: "🌙 Bilan du {day} : aucune opération enregistrée. Envoie-moi tes ventes au fil de la journée, je m'occupe du reste 💪",
-        EN: "🌙 Summary for {day}: nothing recorded. Send me your sales during the day and I'll take care of the rest 💪",
-        PCM: "🌙 How market go for {day}: nothing recorded. Send me your sales as the day dey go, I go handle the rest 💪",
+        FR: "{emoji} {greeting} ! Bilan du {day} : aucune opération enregistrée. Envoie-moi tes ventes au fil de la journée, je m'occupe du reste 💪",
+        EN: "{emoji} {greeting}! Summary for {day}: nothing recorded. Send me your sales during the day and I'll take care of the rest 💪",
+        PCM: "{emoji} {greeting}! How market go for {day}: nothing recorded. Send me your sales as the day dey go, I go handle the rest 💪",
     },
     "offer_today": {
         FR: "💡 Tape RÉSUMÉ pour voir le bilan du jour.",
@@ -100,8 +108,21 @@ TEMPLATES: dict[str, dict[Language, str]] = {
 }
 
 
+# Closing words, by time of day: "Bonne soirée" only in the evening.
+_CLOSINGS = {
+    Language.FR: {Period.MORNING: "Bonne journée ! 🙏", Period.AFTERNOON: "Bonne fin de journée ! 🙏", Period.EVENING: "Bonne soirée ! 🙏"},
+    Language.EN: {Period.MORNING: "Have a good day! 🙏", Period.AFTERNOON: "Have a good afternoon! 🙏", Period.EVENING: "Have a good evening! 🙏"},
+    Language.PIDGIN: {Period.MORNING: "Make the day go well o! 🙏", Period.AFTERNOON: "Make the rest of the day go well o! 🙏", Period.EVENING: "Rest well o! 🙏"},
+}
+
+
 def _t(key: str, language: Language, **values) -> str:
     return TEMPLATES[key][language].format(**values)
+
+
+def _greeting_values(language: Language) -> dict:
+    period = greetings.period()
+    return {"greeting": greetings.greeting(language), "emoji": greetings.EMOJI[period]}
 
 
 def day_label(figures: DayFigures, language: Language) -> str:
@@ -117,7 +138,7 @@ def _percent(value: int | None) -> str:
 
 def template(figures: DayFigures, language: Language) -> str:
     """Every figure, no advice: used when the model can't be trusted or reached."""
-    lines = [_t("header", language, day=day_label(figures, language))]
+    lines = [_t("header", language, day=day_label(figures, language), **_greeting_values(language))]
     if figures.sales_count:
         line = _t("sales", language, count=figures.sales_count, total=format_amount(figures.sales_total))
         if figures.credit_sales_count:
@@ -151,12 +172,12 @@ def template(figures: DayFigures, language: Language) -> str:
         lines.append(_t("low_stock", language, items=items))
     if figures.out_of_stock:
         lines.append(_t("out_of_stock", language, items=", ".join(s.name for s in figures.out_of_stock[:MAX_LIST])))
-    lines.append(_t("closing", language))
+    lines.append(_CLOSINGS[language][greetings.period()])
     return "\n".join(lines)
 
 
 def empty_day(figures: DayFigures, language: Language) -> str:
-    return _t("empty", language, day=day_label(figures, language))
+    return _t("empty", language, day=day_label(figures, language), **_greeting_values(language))
 
 
 def offer(language: Language, yesterday: bool) -> str:
@@ -173,6 +194,7 @@ def figures_for_model(figures: DayFigures, language: Language) -> dict:
         return [{"product": s.name, "stock": format_quantity(s.stock, language)} for s in items[:MAX_LIST]]
 
     return {
+        "greeting": greetings.greeting(language),
         "day": day_label(figures, language),
         "sales": {
             "count": figures.sales_count,
@@ -234,11 +256,26 @@ def unknown_amounts(text: str, figures: DayFigures) -> list[str]:
     return unknown
 
 
+def _greeting_ok(text: str, language: Language) -> bool:
+    """The expected greeting opens the message, and no other one (no "Bonjour" at 20:00)."""
+    lowered = text.lower()
+    first_line = lowered.split("\n", 1)[0]
+    if greetings.greeting(language).lower() not in first_line:
+        return False
+    return not any(other.lower() in lowered for other in greetings.other_greetings(language))
+
+
 def _write_with_model(figures: DayFigures, language: Language) -> str:
     response = meta_client.create_completion(
         model=get_settings().model_text,
         messages=[
-            {"role": "system", "content": SUMMARY_PROMPT.format(language=LANGUAGE_NAMES[language])},
+            {
+                "role": "system",
+                "content": SUMMARY_PROMPT.format(
+                    language=LANGUAGE_NAMES[language], greeting=greetings.greeting(language),
+                    period=greetings.period().value,
+                ),
+            },
             {"role": "user", "content": json.dumps(figures_for_model(figures, language), ensure_ascii=False)},
         ],
         reasoning_effort=REASONING_EFFORT,
@@ -257,6 +294,9 @@ def write_summary(figures: DayFigures, language: Language) -> str:
         return template(figures, language)
     if not text or len(text) > MAX_CHARS:
         logger.warning("Summary for shop %s written from the template: model text empty or too long", figures.shop_id)
+        return template(figures, language)
+    if not _greeting_ok(text, language):
+        logger.warning("Summary for shop %s written from the template: wrong or missing greeting", figures.shop_id)
         return template(figures, language)
     unknown = unknown_amounts(text, figures)
     if unknown:

@@ -11,9 +11,9 @@ from sqlalchemy import select
 
 from app import db, meta_client
 from app.logging_config import mask_phone
-from app.models import Language, Shop
+from app.models import Language, PendingKind, Shop
 from app.schemas import Action, Extraction
-from app.services import audio, daily, ledger, pending, replies, transcribe, vision
+from app.services import audio, daily, greetings, ledger, pending, products, replies, transcribe, vision
 from app.whatsapp import media
 from app.whatsapp.client import GraphAPIError
 from app.whatsapp.payload import Message
@@ -50,9 +50,33 @@ def _with_heard(reply: str, transcript: str | None, language: Language) -> str:
     return replies.heard(transcript, language) + "\n" + reply
 
 
-def _answer_pending(message: Message, decision: pending.Decision) -> tuple[str, Language] | None:
-    """Apply or cancel the merchant's latest pending action. None if they have none (or it expired)."""
+def _known_products(owner_phone: str) -> list[str]:
+    """The shop's product names, for the model to reuse."""
+    try:
+        with db.SessionLocal() as session:
+            shop_id = session.scalar(select(Shop.id).where(Shop.owner_phone == owner_phone))
+            return products.known_names(session, shop_id) if shop_id is not None else []
+    except Exception as exc:  # no traceback: SQL errors would print the phone number
+        logger.error("Could not list the products of %s: %s", mask_phone(owner_phone), type(exc).__name__)
+        return []
+
+
+def _reply_to_result(result: ledger.LedgerResult, language: Language) -> str:
+    if result.choice is not None:
+        return replies.product_choice(result.choice, language)
+    if result.duplicate:
+        return replies.already_saved(language)
+    return replies.confirmation(result)
+
+
+def _answer_pending(message: Message, text: str) -> tuple[str, Language] | None:
+    """Answer the merchant's latest pending action, if the message answers it.
+
+    YES / NO for a photo, or the product picked for "Quel savon : Azur ou Palmida ?".
+    None if there is nothing pending (or it expired) or the message is something else.
+    """
     sender = mask_phone(message.sender)
+    decision = pending.parse_decision(text)
     try:
         with db.SessionLocal() as session:
             waiting = pending.latest_active(session, message.sender)
@@ -61,20 +85,40 @@ def _answer_pending(message: Message, decision: pending.Decision) -> tuple[str, 
                 return None
             language = pending.language_of(waiting, session.get(Shop, waiting.shop_id).language)
             pending_id = waiting.id
+            if waiting.kind == PendingKind.CHOOSE_PRODUCT:
+                option = pending.parse_choice(text, waiting)
+                if option is None and decision != pending.Decision.NO:
+                    session.commit()
+                    return None  # not an answer: a new message; the question stays open
+            elif decision is None:
+                session.commit()
+                return None
             if decision == pending.Decision.NO:
                 pending.cancel(session, waiting)
                 logger.info("Pending action %s cancelled by %s", pending_id, sender)
                 return replies.cancelled(language), language
-            result = pending.confirm(session, waiting)
+            if waiting.kind == PendingKind.CHOOSE_PRODUCT:
+                result = pending.choose(session, waiting, option)
+            else:
+                result = pending.confirm(session, waiting)
     except Exception:
         logger.exception("Could not answer the pending action of %s", sender)
         language = _shop_language(message.sender)
         return replies.apology(language), language
 
-    logger.info("Pending action %s confirmed by %s", pending_id, sender)
-    if result.duplicate:
-        return replies.already_saved(language), language
-    return replies.confirmation(result), result.language
+    logger.info("Pending action %s answered by %s", pending_id, sender)
+    reply_language = language if result.choice or result.duplicate else result.language
+    return _reply_to_result(result, language), reply_language
+
+
+def _welcome(message: Message, text: str) -> tuple[str, Language] | None:
+    """"Bonjour", "hello", "how far": a greeting for the time of day and how to use Boutiko."""
+    said_in = greetings.parse_greeting(text)
+    if said_in is False:
+        return None
+    if said_in is None:  # English word: Pidgin if that's how the merchant writes
+        said_in = Language.PIDGIN if _shop_language(message.sender) == Language.PIDGIN else Language.EN
+    return replies.welcome(said_in, greetings.greeting(said_in)), said_in
 
 
 def _summary_command(message: Message, text: str) -> tuple[str, Language] | None:
@@ -97,25 +141,19 @@ def _summary_command(message: Message, text: str) -> tuple[str, Language] | None
 def _process_text(message: Message, text: str, transcript: str | None = None) -> str | None:
     """Extraction -> ledger -> reply, shared by text messages and transcribed voice notes.
 
-    A plain YES / NO answers the latest pending photo instead, and "résumé" sends the
-    day's summary, both without calling the extraction model.
+    These are answered without calling the extraction model: YES / NO for a
+    pending photo, the product picked after "Quel savon ?", "résumé", a greeting.
     With a transcript, the reply starts with what was understood.
     """
-    decision = pending.parse_decision(text)
-    if decision is not None:
-        answer = _answer_pending(message, decision)
+    for handler in (_answer_pending, _summary_command, _welcome):
+        answer = handler(message, text)
         if answer is not None:
             reply, language = answer
             return _with_heard(reply, transcript, language)
 
-    command = _summary_command(message, text)
-    if command is not None:
-        reply, language = command
-        return _with_heard(reply, transcript, language)
-
     sender = mask_phone(message.sender)
     try:
-        extraction = meta_client.extract_from_text(text)
+        extraction = meta_client.extract_from_text(text, known_products=_known_products(message.sender))
     except meta_client.ExtractionError as exc:
         logger.error("Extraction failed for message %s from %s: %s", message.id, sender, exc)
         language = _shop_language(message.sender)
@@ -134,6 +172,9 @@ def _record(message: Message, extraction: Extraction, transcript: str | None = N
     try:
         with db.SessionLocal() as session:
             result = ledger.apply_extraction(session, message.sender, extraction, message.id)
+            if result.choice is not None:  # nothing recorded: ask which product first
+                pending.save_choice(session, message.sender, extraction, message.id, result.choice)
+                logger.info("Message %s: product to choose among %d", message.id, len(result.choice.options))
     except Exception:
         logger.exception("Could not record message %s from %s", message.id, sender)
         language = Language(extraction.language) if extraction.language else Language.FR
@@ -142,7 +183,7 @@ def _record(message: Message, extraction: Extraction, transcript: str | None = N
     if result.duplicate:
         logger.info("Message %s was already recorded, no reply", message.id)
         return None
-    return _with_heard(replies.confirmation(result), transcript, result.language)
+    return _with_heard(_reply_to_result(result, result.language), transcript, result.language)
 
 
 def handle_text(message: Message) -> str | None:
@@ -218,7 +259,9 @@ def handle_image(message: Message) -> str | None:
         return replies.photo_unsupported(language)
 
     try:
-        reading = vision.analyze_image(data, mime_type, message.image.caption, language)
+        reading = vision.analyze_image(
+            data, mime_type, message.image.caption, language, known_products=_known_products(message.sender)
+        )
     except vision.VisionError as exc:
         logger.error("Vision failed for photo %s from %s: %s", message.id, sender, exc)
         return replies.photo_failed(language)

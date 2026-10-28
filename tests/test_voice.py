@@ -118,7 +118,7 @@ def model(monkeypatch):
     """Text extraction: record the texts it receives and return state["extraction"]."""
     state = {"extraction": Extraction(), "texts": []}
 
-    def fake_extract(text):
+    def fake_extract(text, known_products=None):
         state["texts"].append(text)
         return state["extraction"]
 
@@ -165,7 +165,7 @@ def test_voice_note_goes_through_the_text_pipeline(client, sent, session_factory
     # reply: what was heard, then the usual confirmation
     lines = sent[0][1].split("\n")
     assert lines[0] == "🎙️ J'ai compris : \"Marie a pris 2 kg de sucre à crédit, 1 500\""
-    assert lines[1] == "📝 2 kg de sucre à crédit pour Marie, 1 500 FCFA. Reste : -2."
+    assert lines[1] == "📝 2 kg de sucre à crédit pour Marie, 1 500 FCFA."
     assert "📝 Marie doit maintenant 1 500 FCFA." in lines
     assert count(session_factory, Sale) == 1
     assert count(session_factory, Debt) == 1
@@ -183,7 +183,7 @@ def test_heard_line_follows_detected_language(client, sent, session_factory, gra
 
 
 def test_asr_request_format(client, sent, session_factory, graph, ffmpeg, asr, chat, model):
-    asr["responses"] = [asr_ok("bonjour")]
+    asr["responses"] = [asr_ok("le marché est calme")]
     send_voice(client)
 
     request = asr["requests"][0]
@@ -236,13 +236,13 @@ def test_fallback_when_asr_transcript_is_empty(client, sent, session_factory, gr
 
 
 def test_asr_is_retried_once_on_5xx_and_429(client, sent, session_factory, graph, ffmpeg, asr, chat, model):
-    asr["responses"] = [httpx.Response(503), asr_ok("bonjour")]
+    asr["responses"] = [httpx.Response(503), asr_ok("le marché est calme")]
     send_voice(client, message_id="wamid.A")
     assert len(asr["requests"]) == 2
     assert chat["calls"] == []
 
     asr["responses"] = [httpx.Response(429), httpx.Response(429)]
-    chat["outcomes"] = ["bonjour"]
+    chat["outcomes"] = ["le marché est calme"]
     send_voice(client, message_id="wamid.B")
     assert len(asr["requests"]) == 4  # retried once, then fallback
     assert len(chat["calls"]) == 1
@@ -251,10 +251,10 @@ def test_asr_is_retried_once_on_5xx_and_429(client, sent, session_factory, graph
 def test_fallback_chat_is_retried_once(client, sent, session_factory, graph, ffmpeg, asr, chat, model):
     request = httpx.Request("POST", "https://api.meta.ai/v1/chat/completions")
     asr["responses"] = [httpx.ConnectError("down"), httpx.ConnectError("down")]
-    chat["outcomes"] = [openai.InternalServerError("busy", response=httpx.Response(503, request=request), body=None), "bonjour"]
+    chat["outcomes"] = [openai.InternalServerError("busy", response=httpx.Response(503, request=request), body=None), "le marché est calme"]
     send_voice(client)
     assert len(chat["calls"]) == 2
-    assert model["texts"] == ["bonjour"]
+    assert model["texts"] == ["le marché est calme"]
 
 
 # --- nothing heard / errors ---
@@ -272,7 +272,7 @@ def test_empty_transcript_asks_to_repeat(client, sent, session_factory, graph, f
     if language != "fr":
         # an earlier text message set the shop's language
         model["extraction"] = extraction({"action": "unknown"}, language=language)
-        asr["responses"] = [asr_ok("hello")]
+        asr["responses"] = [asr_ok("market quiet today")]
         send_voice(client, message_id="wamid.FIRST")
         sent.clear()
         model["texts"].clear()
