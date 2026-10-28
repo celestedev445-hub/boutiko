@@ -298,11 +298,17 @@ python scripts/demo_summary.py 237690001234 --send           # send it and recor
 docker compose exec api python scripts/demo_summary.py 237690001234   # with Docker
 ```
 
+## Landing page
+
+A public presentation page is served at `/` (French by default, an FR / EN switch at the top, the choice kept in `localStorage`). It is a single static page — `app/static/index.html` and `app/static/style.css`, no framework, no build, nothing loaded from another site.
+
+The "Try it on WhatsApp" button links to `https://wa.me/<DEMO_WHATSAPP_NUMBER>`. The page reads the number from `GET /api/public-config` (`{"demo_whatsapp_number": "237690001234"}`); when `DEMO_WHATSAPP_NUMBER` is empty, the button is not shown. Only that number is exposed there.
+
 ## Project layout
 
 ```
 app/
-  main.py            FastAPI app
+  main.py            FastAPI app, landing page routes
   config.py          settings from environment / .env
   db.py              SQLAlchemy engine and session
   models.py          data model + stock / debt balance queries
@@ -322,6 +328,7 @@ app/
     summary.py       figures of the day (no model)
     summary_text.py  summary writing, amount guard, templates
     daily.py         summary requests, scheduler, 24 h window
+  static/            landing page (index.html, style.css)
   whatsapp/
     webhook.py       GET verification + POST reception
     router.py        dispatch by message type
@@ -377,6 +384,7 @@ Fill in `.env`. It is git-ignored — never commit it.
 | `SUMMARY_HOUR` | Local hour after which it is sent, defaults to `20` (each merchant can change theirs) |
 | `SHOP_TIMEZONE` | Time zone of the shops, defaults to `Africa/Douala` |
 | `LOW_STOCK_THRESHOLD` | Stock at or below which a product is "low", defaults to `3` |
+| `DEMO_WHATSAPP_NUMBER` | Number of the "Try it on WhatsApp" button on the landing page, digits with country code (e.g. `237690001234`); empty hides the button |
 | `API_PORT` | Host port of the API with Docker, defaults to `8000` |
 
 ### 2a. Run with Docker

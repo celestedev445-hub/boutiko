@@ -1,5 +1,7 @@
+import re
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +30,15 @@ class Settings(BaseSettings):
     summary_hour: int = 20  # local hour, overridable per shop
     shop_timezone: str = "Africa/Douala"
     low_stock_threshold: int = 3
+
+    # Landing page: "Try on WhatsApp" button, hidden when empty
+    demo_whatsapp_number: str = ""
+
+    @field_validator("demo_whatsapp_number")
+    @classmethod
+    def digits_only(cls, value: str) -> str:
+        """wa.me wants digits only: "+237 6 90 00 12 34" -> "237690001234"."""
+        return re.sub(r"\D", "", value)
 
 
 @lru_cache
