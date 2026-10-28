@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import clock
 from app.models import (
     Customer,
     Debt,
@@ -27,7 +28,7 @@ from app.models import (
     customer_balance,
 )
 from app.schemas import Action, ExtractedAction, Extraction
-from app.services.normalize import normalize_name
+from app.services.normalize import is_generic_unit, normalize_name
 
 
 class LedgerWarning(str, enum.Enum):
@@ -71,7 +72,9 @@ def apply_extraction(session: Session, owner_phone: str, extraction: Extraction,
     """
     try:
         shop = get_or_create_shop(session, owner_phone, extraction.language)
-        language = Language(extraction.language) if extraction.language else shop.language
+        if extraction.language:
+            shop.language = Language(extraction.language)  # replies and summaries follow the latest language
+        language = shop.language
         if _already_processed(session, message_id):
             return LedgerResult(shop_id=shop.id, language=language, duplicate=True)
 
@@ -122,7 +125,8 @@ def _find_product(session: Session, shop: Shop, name: str) -> Product | None:
 def _get_or_create_product(session: Session, shop: Shop, name: str, unit: str | None) -> Product:
     product = _find_product(session, shop, name)
     if product is None:
-        product = Product(shop_id=shop.id, name=name, name_key=normalize_name(name), unit=unit or "piece")
+        unit = "piece" if is_generic_unit(unit) else unit
+        product = Product(shop_id=shop.id, name=name, name_key=normalize_name(name), unit=unit)
         session.add(product)
         session.flush()
     return product
@@ -215,6 +219,7 @@ def _apply_sale(session: Session, shop: Shop, extracted: ExtractedAction, messag
         total=total,
         on_credit=on_credit,
         source_message_id=message_id,
+        occurred_at=clock.now(),
     )
     session.add(sale)
     session.flush()
@@ -226,6 +231,7 @@ def _apply_sale(session: Session, shop: Shop, extracted: ExtractedAction, messag
             quantity=-quantity,
             sale_id=sale.id,
             source_message_id=message_id,
+            occurred_at=clock.now(),
         )
     )
     # A debt needs both someone who owes and an amount owed.
@@ -238,6 +244,7 @@ def _apply_sale(session: Session, shop: Shop, extracted: ExtractedAction, messag
                 amount=total,
                 sale_id=sale.id,
                 source_message_id=message_id,
+                occurred_at=clock.now(),
             )
         )
     result.recorded = True
@@ -262,7 +269,9 @@ def _apply_purchase(session: Session, shop: Shop, extracted: ExtractedAction, me
             kind=MovementKind.PURCHASE,
             quantity=extracted.quantity,
             unit_cost=unit_cost,
+            total_cost=total,
             source_message_id=message_id,
+            occurred_at=clock.now(),
         )
     )
     result.recorded = True
@@ -287,6 +296,7 @@ def _apply_debt_payment(session: Session, shop: Shop, extracted: ExtractedAction
             kind=DebtKind.REPAYMENT,
             amount=-amount,
             source_message_id=message_id,
+            occurred_at=clock.now(),
         )
     )
     session.flush()
@@ -305,5 +315,5 @@ def _check_stock(session: Session, shop: Shop, extracted: ExtractedAction, resul
         result.warnings.append(LedgerWarning.UNKNOWN_PRODUCT)
         return
     result.product = product.name
-    result.unit = product.unit if product.unit != "piece" else None
+    result.unit = None if is_generic_unit(product.unit) else product.unit
     result.stock = current_stock(session, product.id)

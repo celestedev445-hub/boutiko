@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     model_asr: str = "muse-voice-transcribe-1.0"  # speech-to-text, POST /asr/transcribe
     model_asr_fallback: str = "muse-spark-1.2"  # chat model with audio input, used when ASR fails
 
+    # Evening summary
+    summary_enabled: bool = True  # automatic sending; asking for "résumé" always works
+    summary_hour: int = 20  # local hour, overridable per shop
+    shop_timezone: str = "Africa/Douala"
+    low_stock_threshold: int = 3
+
 
 @lru_cache
 def get_settings() -> Settings:

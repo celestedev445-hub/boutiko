@@ -42,7 +42,7 @@ flowchart LR
         R -->|audio| A[Voice handler]
         R -->|image| RC[Photo handler]
         RC --> PA[Pending action<br/>until YES / NO]
-        J[Evening summary job]
+        J[Evening summary<br/>every 15 min]
     end
 
     A -->|muse-voice-transcribe-1.0<br/>fallback muse-spark-1.2| M[Meta Model API]
@@ -52,6 +52,7 @@ flowchart LR
 
     T & PA --> DB[(PostgreSQL)]
     J --> DB
+    J -->|muse-spark-1.3-contributor<br/>writing, amounts checked| M
     API -->|reply / summary| WA --> U
 ```
 
@@ -226,6 +227,42 @@ python scripts/eval_vision.py path/to/photos -v
 
 It prints the image kind, the actions read, the clarification question if any, the time taken and OK/KO against the `.json`. It calls the real API and is not run by `pytest`.
 
+## Evening summary
+
+Every evening, the merchant gets a short message about their day:
+
+```
+🌙 Bilan du mardi 27 octobre
+🛒 Ventes : 6 pour 52 300 FCFA (dont 2 à crédit : 4 500 FCFA)
+📈 Hier : 20 000 FCFA (+162 %)
+🏆 Top : savon Azur (6 · 1 500 FCFA), Maggi (3 · 300 FCFA), huile (3 bidons)
+📦 Achats : 232 500 FCFA
+💵 Dettes encaissées : 500 FCFA · nouvelles dettes : 4 500 FCFA
+📝 On te doit en tout : 4 000 FCFA (2 clients)
+⚠️ Stock bas : Maggi (2)
+❌ Épuisé : sucre, lait, huile
+💡 Pense à racheter du sucre demain : il est épuisé.
+```
+
+1. **Figures** ([`app/services/summary.py`](app/services/summary.py)), computed from the ledger without any model, for the shop's local day (`SHOP_TIMEZONE`): number and total of sales (credit sales included), purchases, debts repaid and new debts, total still owed, top 3 products sold, low stock (`≤ LOW_STOCK_THRESHOLD`) and out of stock, and the change in sales since the day before. All amounts are integers in FCFA; the percentage is rounded with decimals, never floats.
+2. **Writing** ([`app/services/summary_text.py`](app/services/summary_text.py)): `MODEL_TEXT` (`reasoning_effort="low"`) gets the figures as JSON, every amount already written as `25 000 FCFA`, and the merchant's latest language. It writes 8 to 12 warm lines and **one** concrete piece of advice drawn from the figures. A guard then checks that every amount in the text (`52 300 FCFA`, `52.300 F`, `52 300`…) is one of the computed figures and that there's no shorthand like `52k`. If an amount was made up, or the model can't be reached, Boutiko sends a deterministic template (French, English or Pidgin) with the same figures and no advice. A day with nothing recorded gets a short encouraging message, without calling the model.
+3. **Sending** ([`app/services/daily.py`](app/services/daily.py)):
+   - **On request**: a text or voice message that is just *résumé*, *bilan*, *point du jour*, *summary*, *today summary* or *how market go today* gets the day's summary right away, without going through extraction.
+   - **Automatically**: a loop started with the API (FastAPI lifespan) checks every 15 minutes. Once the shop's local time is past its summary hour (`SUMMARY_HOUR`, or the shop's own), the summary is sent if it hasn't been yet that day (automatically or on request), **and** if the merchant's last message is less than 23 h 30 old. Each send is recorded in `daily_summaries` (one row per shop, day and channel `auto` / `manual`), and the row is claimed before sending, so a summary is never sent twice.
+   - **24 h window**: WhatsApp only allows free-form messages within 24 hours of the user's last message, and Boutiko doesn't use paid message templates. When the window is closed, nothing is sent and the log says `summary skipped: outside 24h window`. On the merchant's next message that day, or the next morning before noon, the normal reply ends with *💡 Tape RÉSUMÉ pour voir le bilan d'hier* (or *du jour*), and *RÉSUMÉ* then shows that day.
+   - **Changing the hour**: *résumé à 21h*, *bilan à 19h*, *summary at 9pm* set the shop's own hour and confirm it.
+
+Set `SUMMARY_ENABLED=false` to turn the automatic sending off (asking for *résumé* still works).
+
+To see a shop's summary without sending it:
+
+```bash
+python scripts/demo_summary.py 237690001234                  # today, shop's language
+python scripts/demo_summary.py 237690001234 --day 2026-10-27 --lang en --no-model
+python scripts/demo_summary.py 237690001234 --send           # send it and record it
+docker compose exec api python scripts/demo_summary.py 237690001234   # with Docker
+```
+
 ## Project layout
 
 ```
@@ -245,6 +282,9 @@ app/
     transcribe.py    speech-to-text with Meta models, with fallback
     vision.py        photo reading with a Meta vision model
     pending.py       actions waiting for YES / NO, answer parsing
+    summary.py       figures of the day (no model)
+    summary_text.py  summary writing, amount guard, templates
+    daily.py         summary requests, scheduler, 24 h window
   whatsapp/
     webhook.py       GET verification + POST reception
     router.py        dispatch by message type
@@ -257,6 +297,7 @@ scripts/
   eval_extraction.py extraction accuracy against the real API
   eval_voice.py      transcription accuracy against the real API
   eval_vision.py     photo reading accuracy against the real API
+  demo_summary.py    show (or send) a shop's evening summary
 tests/               pytest suite (Meta API, Graph API and ffmpeg mocked, SQLite)
   data/phrases.json  evaluation dataset
   data/voice/        your recordings for eval_voice.py (git-ignored)
@@ -294,6 +335,10 @@ Fill in `.env`. It is git-ignored — never commit it.
 | `MODEL_ASR` | Speech-to-text model for voice notes, defaults to `muse-voice-transcribe-1.0` |
 | `MODEL_ASR_FALLBACK` | Chat model with audio input, used when `MODEL_ASR` fails, defaults to `muse-spark-1.2` |
 | `MODEL_VISION` | Vision model for photos, defaults to `muse-spark-1.3-contributor` |
+| `SUMMARY_ENABLED` | Send the evening summary automatically, defaults to `true` |
+| `SUMMARY_HOUR` | Local hour after which it is sent, defaults to `20` (each merchant can change theirs) |
+| `SHOP_TIMEZONE` | Time zone of the shops, defaults to `Africa/Douala` |
+| `LOW_STOCK_THRESHOLD` | Stock at or below which a product is "low", defaults to `3` |
 | `API_PORT` | Host port of the API with Docker, defaults to `8000` |
 
 ### 2a. Run with Docker
@@ -405,7 +450,7 @@ curl "https://<your-tunnel-host>/webhook?hub.mode=subscribe&hub.verify_token=<yo
 
 ## Status
 
-Working today: **text messages, voice notes and photos** (Meta speech-to-text with fallback, Meta vision with confirmation before saving, extraction, ledger, replies in French, English and Pidgin), webhook verification and signatures, deduplication, data model and migrations. Next: the evening summary, shelf counting with SAM, and letting the merchant name their shop. Open questions about the Meta Model API (SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
+Working today: **text messages, voice notes and photos** (Meta speech-to-text with fallback, Meta vision with confirmation before saving, extraction, ledger, replies in French, English and Pidgin), the **evening summary** (figures from the ledger, written by a Meta model with an amount guard, sent within WhatsApp's 24 h window), webhook verification and signatures, deduplication, data model and migrations. Next: shelf counting with SAM, and letting the merchant name their shop. Open questions about the Meta Model API (SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
 
 ## Security
 

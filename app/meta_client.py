@@ -87,7 +87,7 @@ def get_client() -> OpenAI:
         api_key=settings.model_api_key,
         base_url=settings.model_api_base_url or DEFAULT_BASE_URL,
         timeout=TIMEOUT_SECONDS,
-        max_retries=0,  # retries are handled in _create, with our own policy
+        max_retries=0,  # retries are handled in create_completion, with our own policy
     )
 
 
@@ -99,7 +99,8 @@ def extraction_response_format() -> dict:
     }
 
 
-def _create(**kwargs):
+def create_completion(**kwargs):
+    """chat.completions.create, retried once on network errors and 5xx."""
     client = get_client()
     try:
         return client.chat.completions.create(**kwargs)
@@ -110,7 +111,7 @@ def _create(**kwargs):
 
 def _extract(user_content) -> Extraction:
     try:
-        response = _create(
+        response = create_completion(
             model=get_settings().model_text,
             messages=[
                 {"role": "system", "content": EXTRACTION_PROMPT},

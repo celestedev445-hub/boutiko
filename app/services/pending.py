@@ -1,17 +1,17 @@
 """Actions waiting for the merchant's YES or NO (photos are never recorded without it)."""
 
 import enum
-import re
-import unicodedata
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import clock
 from app.models import Language, PendingAction, PendingStatus
 from app.schemas import Extraction
 from app.services import ledger
+from app.services.normalize import normalize_command
 
 TTL = timedelta(minutes=30)
 
@@ -32,17 +32,8 @@ _NO = {
     "non non", "no no", "stop", "dont", "dont save",
     "no be so", "no be am", "no o", "comot am",
 }
-# Politeness words a merchant may add: "oui merci", "yes please".
-_FILLERS = {"merci", "please", "pls", "plz", "stp", "svp", "thanks", "thank", "you", "boss", "sir", "ma", "oh"}
 _YES_EMOJI = ("👍", "✅", "👌")
 _NO_EMOJI = ("👎", "❌")
-
-
-def _normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(c for c in text if not unicodedata.combining(c)).lower()
-    text = text.replace("'", " ").replace("’", " ")
-    return " ".join(re.findall(r"[a-z0-9]+", text))
 
 
 def parse_decision(text: str) -> Decision | None:
@@ -52,19 +43,12 @@ def parse_decision(text: str) -> Decision | None:
         return Decision.YES
     if stripped and all(c in "".join(_NO_EMOJI) + " ️" for c in stripped):
         return Decision.NO
-    words = _normalize(text).split()
-    while len(words) > 1 and words[-1] in _FILLERS:
-        words.pop()
-    phrase = " ".join(words)
+    phrase = normalize_command(text)
     if phrase in _YES:
         return Decision.YES
     if phrase in _NO:
         return Decision.NO
     return None
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
 
 
 def exists_for_message(session: Session, message_id: str) -> bool:
@@ -76,7 +60,7 @@ def create(session: Session, wa_id: str, extraction: Extraction, message_id: str
     if exists_for_message(session, message_id):
         return None
     shop = ledger.get_or_create_shop(session, wa_id, extraction.language)
-    now = _now()
+    now = clock.now()
     pending = PendingAction(
         shop_id=shop.id,
         wa_id=wa_id,
@@ -100,7 +84,7 @@ def latest_active(session: Session, wa_id: str) -> PendingAction | None:
 
     Expired ones are marked as such on the way.
     """
-    now = _now()
+    now = clock.now()
     session.execute(
         update(PendingAction)
         .where(PendingAction.wa_id == wa_id, PendingAction.status == PendingStatus.PENDING, PendingAction.expires_at <= now)

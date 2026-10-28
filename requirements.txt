@@ -7,3 +7,4 @@ alembic>=1.13
 psycopg[binary]>=3.2
 openai>=1.40
 httpx>=0.27
+tzdata>=2024.1  # time zones (Africa/Douala) on slim images and Windows

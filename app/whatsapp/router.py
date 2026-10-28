@@ -13,7 +13,7 @@ from app import db, meta_client
 from app.logging_config import mask_phone
 from app.models import Language, Shop
 from app.schemas import Action, Extraction
-from app.services import audio, ledger, pending, replies, transcribe, vision
+from app.services import audio, daily, ledger, pending, replies, transcribe, vision
 from app.whatsapp import media
 from app.whatsapp.client import GraphAPIError
 from app.whatsapp.payload import Message
@@ -77,10 +77,28 @@ def _answer_pending(message: Message, decision: pending.Decision) -> tuple[str, 
     return replies.confirmation(result), result.language
 
 
+def _summary_command(message: Message, text: str) -> tuple[str, Language] | None:
+    """"résumé", "how market go today", "résumé à 21h"... None if the text is none of them."""
+    hour_command = daily.parse_summary_hour(text)
+    requested = daily.parse_summary_request(text)
+    if hour_command is None and requested is False:
+        return None
+    try:
+        with db.SessionLocal() as session:
+            if hour_command is not None:
+                return daily.set_summary_hour(session, message.sender, *hour_command)
+            return daily.manual_summary(session, message.sender, requested)
+    except Exception:
+        logger.exception("Summary command failed for %s", mask_phone(message.sender))
+        language = _shop_language(message.sender)
+        return replies.apology(language), language
+
+
 def _process_text(message: Message, text: str, transcript: str | None = None) -> str | None:
     """Extraction -> ledger -> reply, shared by text messages and transcribed voice notes.
 
-    A plain YES / NO answers the latest pending photo instead, without calling the model.
+    A plain YES / NO answers the latest pending photo instead, and "résumé" sends the
+    day's summary, both without calling the extraction model.
     With a transcript, the reply starts with what was understood.
     """
     decision = pending.parse_decision(text)
@@ -89,6 +107,11 @@ def _process_text(message: Message, text: str, transcript: str | None = None) ->
         if answer is not None:
             reply, language = answer
             return _with_heard(reply, transcript, language)
+
+    command = _summary_command(message, text)
+    if command is not None:
+        reply, language = command
+        return _with_heard(reply, transcript, language)
 
     sender = mask_phone(message.sender)
     try:
@@ -242,5 +265,19 @@ HANDLERS: dict[str, Callable[[Message], str | None]] = {
 }
 
 
+def _after_inbound(message: Message) -> str | None:
+    try:
+        with db.SessionLocal() as session:
+            return daily.after_inbound(session, message.sender)
+    except Exception as exc:  # no traceback: SQL errors would print the phone number
+        logger.error("Could not note the last message of %s: %s", mask_phone(message.sender), type(exc).__name__)
+        return None
+
+
 def route(message: Message) -> str | None:
-    return HANDLERS.get(message.type, handle_unsupported)(message)
+    reply = HANDLERS.get(message.type, handle_unsupported)(message)
+    # Every message reopens WhatsApp's 24 h window; a skipped summary is offered after the reply.
+    offer = _after_inbound(message)
+    if reply is not None and offer:
+        reply = f"{reply}\n\n{offer}"
+    return reply

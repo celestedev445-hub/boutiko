@@ -20,6 +20,7 @@ def settings(monkeypatch):
     monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", VERIFY_TOKEN)
     monkeypatch.delenv("WHATSAPP_APP_SECRET", raising=False)
     monkeypatch.setenv("DATABASE_URL", "sqlite://")
+    monkeypatch.setenv("SUMMARY_ENABLED", "false")  # never start the scheduler loop in tests
     # No key: any Meta API call a test forgot to mock fails instead of reaching the network.
     monkeypatch.delenv("MODEL_API_KEY", raising=False)
     meta_client.get_client.cache_clear()

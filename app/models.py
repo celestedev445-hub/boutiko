@@ -7,12 +7,14 @@ Money amounts are integers in the shop's currency (FCFA has no subunit).
 """
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Date,
     DateTime,
+    Integer,
     Enum,
     ForeignKey,
     JSON,
@@ -47,6 +49,11 @@ class MovementKind(str, enum.Enum):
     LOSS = "loss"  # spoiled, broken, stolen
 
 
+class SummaryChannel(str, enum.Enum):
+    AUTO = "auto"  # sent by the scheduler in the evening
+    MANUAL = "manual"  # the merchant asked for it
+
+
 class PendingStatus(str, enum.Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
@@ -67,6 +74,13 @@ class Shop(Base):
     owner_phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     language: Mapped[Language] = mapped_column(_enum(Language), default=Language.FR)
     currency: Mapped[str] = mapped_column(String(3), default="XAF")
+    summary_hour: Mapped[int | None] = mapped_column(Integer)  # None: settings.summary_hour
+    # WhatsApp only allows free-form messages within 24 h of the merchant's last message.
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Day whose automatic summary couldn't be sent (24 h window closed), to offer it on the next message.
+    summary_skipped_day: Mapped[date | None] = mapped_column(Date)
+    # Day whose summary was offered ("tape RÉSUMÉ"): "résumé" shows that day, the scheduler leaves it alone.
+    summary_offered_day: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Children are removed by the database (ON DELETE CASCADE), not by the ORM.
@@ -100,6 +114,7 @@ class StockMovement(Base):
     # Signed: positive adds to stock, negative removes from it.
     quantity: Mapped[Decimal] = mapped_column(Quantity)
     unit_cost: Mapped[int | None] = mapped_column(BigInteger)
+    total_cost: Mapped[int | None] = mapped_column(BigInteger)  # purchases: amount paid for the line, as stated
     sale_id: Mapped[int | None] = mapped_column(ForeignKey("sales.id", ondelete="SET NULL"))
     # WhatsApp message id that produced this movement, for traceability/idempotency.
     source_message_id: Mapped[str | None] = mapped_column(String(128))
@@ -180,6 +195,19 @@ class PendingAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[PendingStatus] = mapped_column(_enum(PendingStatus), default=PendingStatus.PENDING)
+
+
+class DailySummary(Base):
+    """A summary sent to a merchant: at most one per day and channel."""
+
+    __tablename__ = "daily_summaries"
+    __table_args__ = (UniqueConstraint("shop_id", "day", "channel", name="uq_daily_summaries_shop_id_day_channel"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    day: Mapped[date] = mapped_column(Date)  # the shop's local day
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    channel: Mapped[SummaryChannel] = mapped_column(_enum(SummaryChannel))
 
 
 def current_stock(session: Session, product_id: int, at: datetime | None = None) -> Decimal:

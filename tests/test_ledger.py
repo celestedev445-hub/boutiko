@@ -48,11 +48,26 @@ def test_first_message_creates_shop_with_detected_language(session):
     assert shop.language == Language.PIDGIN
 
 
-def test_shop_is_reused(session):
+def test_shop_is_reused_and_follows_the_latest_language(session):
     apply(session, {"action": "purchase", "product": "savon", "quantity": 5})
     apply(session, {"action": "purchase", "product": "savon", "quantity": 5}, language="en")
     assert count(session, Shop) == 1
-    assert session.scalar(select(Shop)).language == Language.FR
+    assert session.scalar(select(Shop)).language == Language.EN
+    apply(session, {"action": "purchase", "product": "savon", "quantity": 5}, language=None)
+    assert session.scalar(select(Shop)).language == Language.EN  # nothing detected: unchanged
+
+
+def test_generic_units_are_not_kept(session):
+    apply(session, {"action": "purchase", "product": "savon Azur", "quantity": 12, "unit": "pièces"})
+    assert session.scalar(select(Product)).unit == "piece"
+    result = apply(session, {"action": "stock_check", "product": "savon azur"})
+    assert result.actions[0].unit is None
+
+
+def test_purchase_total_cost_is_the_stated_total(session):
+    apply(session, {"action": "purchase", "product": "riz", "quantity": 3, "unit": "sac", "total_price": 25000})
+    movement = session.scalar(select(StockMovement))
+    assert (movement.unit_cost, movement.total_cost) == (8333, 25000)
 
 
 # --- each action ---

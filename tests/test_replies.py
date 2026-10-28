@@ -51,6 +51,20 @@ def test_sale_without_unit_pluralizes_product():
     assert reply(FR, sale(product="savon", unit=None, total=750)).startswith("✅ 3 savons vendus, 750 FCFA.")
 
 
+@pytest.mark.parametrize("unit", ["pieces", "pièces", "Pièce", "piece", "pcs", "unités", "units", None])
+def test_generic_unit_is_not_shown(unit):
+    item = dict(product="savons Azur", unit=unit, quantity=Decimal(12), total=3000, stock=Decimal(5))
+    assert reply(FR, sale(**item)) == "✅ 12 savons Azur vendus, 3 000 FCFA. Reste : 5."
+    assert reply(EN, sale(**item)).startswith("✅ 12 savons Azur sold")
+    check = ActionResult(action=Action.STOCK_CHECK, product="savon Azur", unit=unit, stock=Decimal(12))
+    assert reply(FR, check) == "📦 Savon Azur : 12 en stock."  # brand keeps its capital
+
+
+@pytest.mark.parametrize(("unit", "expected"), [("kg", "12 kg de"), ("sac", "12 sacs de"), ("carton", "12 cartons de"), ("L", "12 L de")])
+def test_real_units_are_kept(unit, expected):
+    assert reply(FR, sale(product="riz", unit=unit, quantity=Decimal(12))).startswith(f"✅ {expected} riz vendus")
+
+
 def test_units_and_plurals():
     half = dict(product="sucre", unit="kg", quantity=Decimal("1.5"), total=1500)
     assert reply(FR, sale(**half)).startswith("✅ 1,5 kg de sucre vendu, 1 500 FCFA.")

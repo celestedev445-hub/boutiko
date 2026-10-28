@@ -5,6 +5,7 @@ from decimal import Decimal
 from app.models import Language
 from app.schemas import Action, ExtractedAction, Extraction
 from app.services.ledger import ActionResult, LedgerResult, LedgerWarning
+from app.services.normalize import is_generic_unit
 
 FR, EN, PCM = Language.FR, Language.EN, Language.PIDGIN
 
@@ -225,11 +226,17 @@ def _plural(word: str, quantity: Decimal | None, language: Language) -> str:
     return word + "s"
 
 
+def quantity_with_unit(quantity: Decimal, unit: str | None, language: Language) -> str:
+    """"12", "3 sacs", "1,5 kg"."""
+    text = format_quantity(quantity, language)
+    return text if is_generic_unit(unit) else f"{text} {_plural(unit, quantity, language)}"
+
+
 def _item(result: ActionResult, language: Language) -> str:
     """"3 sacs de riz", "3 bags of rice", "4 tin milk", "3 savons"."""
     quantity = format_quantity(result.quantity, language)
     product = result.product or ""
-    if result.unit:
+    if not is_generic_unit(result.unit):
         unit = _plural(result.unit, result.quantity, language)
         joiner = {FR: " de ", EN: " of ", PCM: " "}[language]
         if language == FR and product[:1].lower() in "aeiouhâéèêîôœ" and product:
@@ -279,8 +286,8 @@ def _action_lines(result: ActionResult, language: Language) -> list[str]:
         if result.customer_balance is not None and result.action in (Action.CREDIT_SALE, Action.DEBT_PAYMENT):
             lines.append(_balance_line(result, language))
     elif result.action == Action.STOCK_CHECK and result.stock is not None:
-        unit = f" {_plural(result.unit, result.stock, language)}" if result.unit else ""
-        lines.append(_t("stock_check", language, product=result.product.capitalize(), stock=stock + unit))
+        unit = "" if is_generic_unit(result.unit) else f" {_plural(result.unit, result.stock, language)}"
+        lines.append(_t("stock_check", language, product=result.product[:1].upper() + result.product[1:], stock=stock + unit))
 
     for warning in result.warnings:
         if warning == LedgerWarning.NOT_UNDERSTOOD:
