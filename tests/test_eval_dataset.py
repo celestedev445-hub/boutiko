@@ -5,6 +5,7 @@ from collections import Counter
 
 from app.schemas import Action, ExtractedAction
 from scripts.eval_extraction import PHRASES, compare
+from scripts.eval_voice import similarity
 
 phrases = json.loads(PHRASES.read_text(encoding="utf-8"))
 
@@ -46,3 +47,9 @@ def test_compare_quantity_one_accepts_price_or_total():
     expected = [{"action": "credit_sale", "product": "rice", "quantity": 1, "total_price": 23000, "customer": "Mama Ngozi"}]
     got = [{"action": "credit_sale", "product": "bag of rice", "quantity": 1, "price": 23000, "customer": "Mama Ngozi"}]
     assert compare(expected, got) == []
+
+
+def test_voice_similarity():
+    assert similarity("J'ai vendu 3 sacs de riz pour 25 000", "jai vendu 3 sacs de riz pour 25000.") == 1
+    assert similarity("vendu 3 savons", "vendu trois savons") < 1
+    assert similarity("vendu 3 savons", "") == 0

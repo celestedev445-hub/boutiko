@@ -104,6 +104,26 @@ TEXTS: dict[str, dict[Language, str]] = {
         EN: "🤔 I didn't understand part of the message.",
         PCM: "🤔 Part of the message no clear for me.",
     },
+    "heard": {
+        FR: "🎙️ J'ai compris : \"{text}\"",
+        EN: "🎙️ I heard: \"{text}\"",
+        PCM: "🎙️ I hear say: \"{text}\"",
+    },
+    "voice_not_heard": {
+        FR: "🎙️ Je n'ai pas bien entendu. Tu peux répéter plus près du téléphone, ou écrire ton message ?",
+        EN: "🎙️ I couldn't hear that clearly. Can you say it again closer to the phone, or type your message?",
+        PCM: "🎙️ I no hear am well. Talk am again near the phone, or write the message?",
+    },
+    "voice_too_long": {
+        FR: "🎙️ Ta note vocale est trop longue pour moi (5 minutes maximum). Envoie un message plus court ou écris-le.",
+        EN: "🎙️ Your voice note is too long for me (5 minutes max). Send a shorter one or type your message.",
+        PCM: "🎙️ Your voice note too long for me (5 minutes max). Send short one or write am.",
+    },
+    "voice_failed": {
+        FR: "🎙️ Je n'ai pas pu écouter ta note vocale. Réessaie dans un instant, ou écris ton message.",
+        EN: "🎙️ I couldn't listen to your voice note. Try again in a moment, or type your message.",
+        PCM: "🎙️ I no fit listen your voice note. Try again small time, or write the message.",
+    },
     "apology": {
         FR: "Je n'ai pas pu lire ton message, réessaie dans un instant.",
         EN: "I couldn't read your message, please try again in a moment.",
@@ -222,3 +242,26 @@ def confirmation(result: LedgerResult) -> str:
 
 def apology(language: Language = FR) -> str:
     return _t("apology", language)
+
+
+MAX_HEARD_CHARS = 300
+
+
+def heard(transcript: str, language: Language) -> str:
+    """First line of a voice-note reply: what Boutiko understood."""
+    text = " ".join(transcript.split())
+    if len(text) > MAX_HEARD_CHARS:
+        text = text[: MAX_HEARD_CHARS - 1] + "…"
+    return _t("heard", language, text=text)
+
+
+def voice_not_heard(language: Language) -> str:
+    return _t("voice_not_heard", language)
+
+
+def voice_too_long(language: Language) -> str:
+    return _t("voice_too_long", language)
+
+
+def voice_failed(language: Language) -> str:
+    return _t("voice_failed", language)

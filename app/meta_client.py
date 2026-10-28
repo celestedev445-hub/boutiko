@@ -4,8 +4,9 @@ Verified against the API: base URL https://api.meta.ai/v1, chat.completions,
 strict json_schema structured output, and reasoning_effort (the text model
 reasons; "none" is rejected with a 400, so we use "low").
 
-TODO: still unverified — image input format, the transcription endpoint and
-the SAM endpoint.
+Voice notes are transcribed in app/services/transcribe.py.
+
+TODO: still unverified — image input format and the SAM endpoint.
 """
 
 import base64
@@ -21,7 +22,6 @@ from app.schemas import Extraction, strict_json_schema
 
 logger = logging.getLogger(__name__)
 
-VOICE_MODEL = "muse-voice-transcribe-1.0"  # voice notes
 SEGMENT_MODEL = "sam-3.1"  # counting products on a shelf
 
 DEFAULT_BASE_URL = "https://api.meta.ai/v1"
@@ -143,14 +143,6 @@ def extract_from_receipt(image: bytes, mime_type: str = "image/jpeg") -> Extract
             {"type": "image_url", "image_url": {"url": data_url}},
         ]
     )
-
-
-def transcribe(audio: bytes, filename: str = "voice.ogg") -> str:
-    """Transcribe a WhatsApp voice note (OGG/Opus)."""
-    # TODO: confirm the endpoint is /audio/transcriptions, that OGG/Opus is accepted as-is,
-    # and whether a language hint (fr/en/pcm) improves results.
-    result = get_client().audio.transcriptions.create(model=VOICE_MODEL, file=(filename, audio))
-    return result.text
 
 
 def count_shelf(image: bytes, product_hints: list[str]) -> dict[str, int]:

@@ -45,7 +45,8 @@ flowchart LR
         J[Evening summary job]
     end
 
-    A -->|muse-voice-transcribe-1.0| M[Meta Model API]
+    A -->|muse-voice-transcribe-1.0<br/>fallback muse-spark-1.2| M[Meta Model API]
+    A -->|transcript| T
     T -->|muse-spark-1.3-contributor<br/>JSON extraction| M
     RC -->|muse-spark-1.3-contributor<br/>vision| M
     SH -->|sam-3.1<br/>segmentation & count| M
@@ -87,7 +88,8 @@ All calls go through the Meta Model API with an OpenAI-compatible client (`base_
 | Model | Used for |
 |---|---|
 | `muse-spark-1.3-contributor` (configurable with `MODEL_TEXT`) | Extracting structured actions (JSON) from text, reading receipt photos (vision), tool calls |
-| `muse-voice-transcribe-1.0` | Transcribing WhatsApp voice notes |
+| `muse-voice-transcribe-1.0` (`MODEL_ASR`) | Transcribing WhatsApp voice notes (`POST /asr/transcribe`) |
+| `muse-spark-1.2` (`MODEL_ASR_FALLBACK`) | Fallback transcription, chat completion with an audio input |
 | `sam-3.1` | Segmenting and counting products on a shelf photo |
 
 The extraction output is validated against a Pydantic schema ([`app/schemas.py`](app/schemas.py)): a list of actions, each with `action`, `product`, `quantity`, `unit`, `price` (unit price), `total_price` (line total) and `customer`, plus the detected `language`.
@@ -139,6 +141,44 @@ python scripts/eval_extraction.py --id 10 -v   # one phrase, with the model outp
 
 It reads `MODEL_API_KEY` from `.env`, makes one API call per phrase, and is **not** run by `pytest` (pytest only checks the dataset and the scorer). Product and customer names match when one normalized name contains the other; units are shown but not scored; language detection is scored separately.
 
+## Voice notes
+
+A voice note takes the text pipeline after one extra step: speech-to-text. Only Meta models are used.
+
+```mermaid
+flowchart LR
+    V["Voice note<br/>audio/ogg; codecs=opus"] --> D["Download<br/>Graph API, ≤ 16 MB"]
+    D --> C["ffmpeg<br/>WAV 16 kHz mono 16-bit, ≤ 5 min"]
+    C --> S["POST /asr/transcribe<br/>muse-voice-transcribe-1.0"]
+    S -->|error or empty| F["chat.completions + input_audio<br/>muse-spark-1.2"]
+    S -->|transcript| P[Text pipeline]
+    F -->|transcript| P
+```
+
+1. **Download** ([`app/whatsapp/media.py`](app/whatsapp/media.py)): `GET /{media_id}` on the Graph API gives a short-lived URL, then the file is downloaded with the same access token. Anything above 16 MB is refused, whether the size is announced or not.
+2. **Conversion** ([`app/services/audio.py`](app/services/audio.py)): ffmpeg runs as a subprocess, stdin to stdout, no temporary files, 30 s timeout. It outputs raw PCM and the WAV header is written in Python (through a pipe ffmpeg can't fill in the WAV sizes). Notes longer than 5 minutes are refused.
+3. **Transcription** ([`app/services/transcribe.py`](app/services/transcribe.py)): `POST {MODEL_API_BASE_URL}/asr/transcribe`, multipart with a JSON `request` part (`{"model": MODEL_ASR, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK"}`) and the `audio` part. If it fails or the transcript is empty, the WAV goes to `MODEL_ASR_FALLBACK` through `chat.completions` with an `input_audio` part. Each call: 60 s timeout, one retry on 429, 5xx and network errors. The ASR `sessionId` is logged; the transcript isn't (it's personal data).
+4. **Same path as text**: extraction, ledger, reply. The reply starts with what Boutiko understood, in the detected language:
+
+   ```
+   🎙️ J'ai compris : "Marie a pris 2 kg de sucre à crédit, 1 500"
+   📝 2 kg de sucre à crédit pour Marie, 1 500 FCFA. Reste : 8.
+   📝 Marie doit maintenant 1 500 FCFA.
+   ```
+
+   English: `🎙️ I heard: "…"`, Pidgin: `🎙️ I hear say: "…"`. If nothing intelligible was said, Boutiko asks the merchant to repeat or type the message; if the note is too big or too long, or the audio can't be processed, it says so politely. A redelivered voice note that was already recorded is neither downloaded nor transcribed again.
+
+### Evaluating the transcription
+
+Put recordings in [`tests/data/voice/`](tests/data/voice/README.md) (git-ignored, except its README), each `.ogg` or `.wav` optionally with a `.txt` of the same name holding the expected sentence, then:
+
+```bash
+python scripts/eval_voice.py                    # tests/data/voice/
+python scripts/eval_voice.py path/to/recordings
+```
+
+For each file it prints the transcript from `MODEL_ASR` and from `MODEL_ASR_FALLBACK`, a word-level similarity score when a `.txt` exists, the extracted actions and how long each step took. Like the text evaluation, it calls the real API and is not run by `pytest`.
+
 ## Project layout
 
 ```
@@ -154,24 +194,29 @@ app/
     ledger.py        extraction -> sales, stock movements, debts
     replies.py       confirmations in fr / en / pcm
     normalize.py     product and customer name keys
+    audio.py         voice note -> WAV 16 kHz mono (ffmpeg)
+    transcribe.py    speech-to-text with Meta models, with fallback
   whatsapp/
     webhook.py       GET verification + POST reception
     router.py        dispatch by message type
     payload.py       webhook payload models
-    client.py        send messages / download media
+    client.py        send messages
+    media.py         download voice notes and photos
 alembic/             database migrations
 scripts/
   dev.ps1            local stack + cloudflared tunnel
   eval_extraction.py extraction accuracy against the real API
-tests/               pytest suite (Meta API mocked, SQLite)
+  eval_voice.py      transcription accuracy against the real API
+tests/               pytest suite (Meta API, Graph API and ffmpeg mocked, SQLite)
   data/phrases.json  evaluation dataset
+  data/voice/        your recordings for eval_voice.py (git-ignored)
 ```
 
 ## Getting started
 
 ### Prerequisites
 
-- Docker and Docker Compose, **or** Python 3.12+ and a PostgreSQL server
+- Docker and Docker Compose, **or** Python 3.12+, a PostgreSQL server and ffmpeg (for voice notes; already in the Docker image)
 - A Meta developer app with the WhatsApp product enabled
 - A Meta Model API key
 
@@ -195,6 +240,8 @@ Fill in `.env`. It is git-ignored — never commit it.
 | `MODEL_API_KEY` | Meta Model API key |
 | `MODEL_API_BASE_URL` | Defaults to `https://api.meta.ai/v1` |
 | `MODEL_TEXT` | Text model, defaults to `muse-spark-1.3-contributor` |
+| `MODEL_ASR` | Speech-to-text model for voice notes, defaults to `muse-voice-transcribe-1.0` |
+| `MODEL_ASR_FALLBACK` | Chat model with audio input, used when `MODEL_ASR` fails, defaults to `muse-spark-1.2` |
 | `API_PORT` | Host port of the API with Docker, defaults to `8000` |
 
 ### 2a. Run with Docker
@@ -252,7 +299,7 @@ The fastest way to see the whole loop (WhatsApp → webhook → Meta Model API �
 
 4. **Subscribe to `messages`.** Still under **Webhook fields**, click **Subscribe** next to `messages`.
 
-5. **Send a test message.** In **WhatsApp → API Setup**, make sure your own number is listed as a recipient of the test number. Then send a WhatsApp message to the test number, for example `acheté 20 savons`, then `vendu 3 savons à 250`. You should get `✅ 3 savons vendus, 750 FCFA. Reste : 17.` back within a few seconds.
+5. **Send a test message.** In **WhatsApp → API Setup**, make sure your own number is listed as a recipient of the test number. Then send a WhatsApp message to the test number, for example `acheté 20 savons`, then `vendu 3 savons à 250`. You should get `✅ 3 savons vendus, 750 FCFA. Reste : 17.` back within a few seconds. Then try a voice note saying the same thing: the reply starts with `🎙️ J'ai compris : "…"`.
 
 Watch what happens with `docker compose logs -f api`:
 
@@ -293,7 +340,7 @@ Then, in the [Meta app dashboard](https://developers.facebook.com/apps/):
    - Verify token: the value of `WHATSAPP_VERIFY_TOKEN`
    - Click **Verify and save**. Meta calls `GET /webhook`; the API answers with the challenge.
 3. In **Webhook fields**, subscribe to `messages`.
-4. Send a message to the test number from your phone. Text messages go through the full pipeline; voice notes and photos only get an acknowledgement for now.
+4. Send a message to the test number from your phone. Text messages and voice notes go through the full pipeline; photos only get an acknowledgement for now.
 
 Quick tunnel URLs change on every restart — update the callback URL in the dashboard when they do. Temporary access tokens expire after about 24 hours; use a system-user token for anything longer-lived.
 
@@ -306,7 +353,7 @@ curl "https://<your-tunnel-host>/webhook?hub.mode=subscribe&hub.verify_token=<yo
 
 ## Status
 
-Working today: the full **text** pipeline (extraction, ledger, replies in French, English and Pidgin), webhook verification and signatures, deduplication, data model and migrations. Next: voice notes (transcription), receipt and shelf photos, the evening summary, and letting the merchant name their shop. Open questions about the Meta Model API (image input, transcription, SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
+Working today: the full pipeline for **text messages and voice notes** (Meta speech-to-text with fallback, extraction, ledger, replies in French, English and Pidgin), webhook verification and signatures, deduplication, data model and migrations. Next: receipt and shelf photos, the evening summary, and letting the merchant name their shop. Open questions about the Meta Model API (image input, SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
 
 ## Security
 

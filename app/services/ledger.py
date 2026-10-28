@@ -93,6 +93,11 @@ def apply_extraction(session: Session, owner_phone: str, extraction: Extraction,
         raise
 
 
+def is_processed(session: Session, message_id: str) -> bool:
+    """True if this WhatsApp message was already applied to the ledger."""
+    return _already_processed(session, message_id)
+
+
 def _already_processed(session: Session, message_id: str) -> bool:
     return session.scalar(select(ProcessedMessage.id).where(ProcessedMessage.message_id == message_id)) is not None
 

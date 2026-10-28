@@ -29,3 +29,7 @@ Thumbs.db
 # Private project documents — never publish
 Boutiko-dossier-projet.docx
 Boutiko-dossier-projet.pdf
+
+# Voice recordings for scripts/eval_voice.py (personal data, keep local)
+tests/data/voice/*
+!tests/data/voice/README.md

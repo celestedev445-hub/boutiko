@@ -45,15 +45,3 @@ def send_text(to: str, body: str) -> None:
     if response.is_error:
         raise GraphAPIError.from_response(response)
 
-
-def download_media(media_id: str) -> bytes:
-    """Fetch a voice note or photo: first resolve the media URL, then download it."""
-    settings = get_settings()
-    with httpx.Client(headers=_headers(), timeout=30) as http:
-        meta = http.get(f"{GRAPH_URL}/{settings.whatsapp_api_version}/{media_id}")
-        if meta.is_error:
-            raise GraphAPIError.from_response(meta)
-        media = http.get(meta.json()["url"])
-        if media.is_error:
-            raise GraphAPIError.from_response(media)
-        return media.content

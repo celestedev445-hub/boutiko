@@ -75,9 +75,16 @@ def test_text_message_is_echoed(client, sent):
     assert sent == [("237690000000", "Echo: vendu 3 savons à 250")]
 
 
-def test_audio_message_is_acknowledged(client, sent):
-    client.post("/webhook", json=_payload(_message("audio", audio={"id": "MEDIA1", "mime_type": "audio/ogg"})))
-    assert sent[0][1].startswith("Note vocale reçue")
+def test_audio_message_goes_to_audio_handler(client, sent, monkeypatch):
+    from app.whatsapp import router
+
+    seen = []
+    monkeypatch.setitem(router.HANDLERS, "audio", lambda message: seen.append(message) or "ok")
+    audio = {"id": "MEDIA1", "mime_type": "audio/ogg; codecs=opus", "voice": True}
+    assert client.post("/webhook", json=_payload(_message("audio", audio=audio))).status_code == 200
+    assert seen[0].audio.id == "MEDIA1"
+    assert seen[0].audio.voice is True
+    assert sent == [("237690000000", "ok")]
 
 
 def test_image_routes_to_receipt_by_default(client, sent):

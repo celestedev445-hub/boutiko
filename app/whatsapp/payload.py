@@ -18,6 +18,7 @@ class Media(_Model):
     id: str
     mime_type: str | None = None
     caption: str | None = None
+    voice: bool | None = None  # audio recorded in WhatsApp (voice note) rather than a forwarded file
 
 
 class Message(_Model):
