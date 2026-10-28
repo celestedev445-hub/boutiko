@@ -9,10 +9,10 @@ import enum
 import logging
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Product, Sale, Shop, StockMovement
+from app.models import Debt, MovementKind, Product, Sale, Shop, StockMovement
 from app.services.normalize import is_forbidden_product_key, product_key
 
 logger = logging.getLogger(__name__)
@@ -138,24 +138,115 @@ class DuplicateGroup:
     duplicates: list[Product]
 
 
+@dataclass
+class AmbiguousName:
+    """A name contained in several products' names ("savon": Savon Azur, Savon Palmida): left alone."""
+
+    product: Product
+    candidates: list[Product]
+
+
+@dataclass
+class BlockedProduct:
+    """A product named like the shop or "stock" ("shops"), with what still points to it."""
+
+    product: Product
+    sales: int
+    purchases: int
+    debts: int
+
+    @property
+    def in_use(self) -> bool:
+        return bool(self.sales or self.purchases or self.debts)
+
+
+@dataclass
+class CleanupPlan:
+    same_key: list[DuplicateGroup] = field(default_factory=list)  # "savons" + "Savon"
+    contained: list[DuplicateGroup] = field(default_factory=list)  # "savon" -> "Savon Azur", one candidate
+    ambiguous: list[AmbiguousName] = field(default_factory=list)  # several candidates: not merged
+    blocked: list[BlockedProduct] = field(default_factory=list)  # deleted if unused, else to check
+
+    @property
+    def empty(self) -> bool:
+        return not (self.same_key or self.contained or self.ambiguous or self.blocked)
+
+
+def is_blocked(product: Product) -> bool:
+    return is_forbidden_product_key(product_key(product.name)) or is_forbidden_product_key(product.name_key)
+
+
+def usage(session: Session, product: Product) -> int:
+    return (
+        session.scalar(select(func.count()).select_from(StockMovement).where(StockMovement.product_id == product.id))
+        + session.scalar(select(func.count()).select_from(Sale).where(Sale.product_id == product.id))
+    )
+
+
 def find_duplicates(session: Session, shop_id: int) -> list[DuplicateGroup]:
-    """Products of the shop that share the same product_key."""
+    """Products of the shop that share the same product_key (blocked names left out)."""
     groups: dict[str, list[Product]] = {}
     for product in session.scalars(select(Product).where(Product.shop_id == shop_id).order_by(Product.id)):
-        groups.setdefault(product_key(product.name), []).append(product)
-
-    def usage(product: Product) -> int:
-        return (
-            session.scalar(select(func.count()).select_from(StockMovement).where(StockMovement.product_id == product.id))
-            + session.scalar(select(func.count()).select_from(Sale).where(Sale.product_id == product.id))
-        )
+        if not is_blocked(product):
+            groups.setdefault(product_key(product.name), []).append(product)
 
     result = []
     for key, products in sorted(groups.items()):
         if len(products) > 1:
-            ranked = sorted(products, key=lambda p: (-usage(p), p.id))
+            ranked = sorted(products, key=lambda p: (-usage(session, p), p.id))
             result.append(DuplicateGroup(key=key, keep=ranked[0], duplicates=ranked[1:]))
     return result
+
+
+def plan_cleanup(session: Session, shop_id: int) -> CleanupPlan:
+    """What merge_products would change in the shop, without changing anything."""
+    plan = CleanupPlan(same_key=find_duplicates(session, shop_id))
+    merged_away = {p.id for group in plan.same_key for p in group.duplicates}
+    all_products = list(session.scalars(select(Product).where(Product.shop_id == shop_id).order_by(Product.id)))
+
+    # One product per key: the one same-key merging keeps.
+    products = [p for p in all_products if p.id not in merged_away and not is_blocked(p)]
+    words = {p.id: set(product_key(p.name).split()) for p in products}
+    for product in products:
+        candidates = [other for other in products if other.id != product.id and words[product.id] < words[other.id]]
+        if len(candidates) == 1:
+            keep = candidates[0]
+            plan.contained.append(DuplicateGroup(key=product_key(keep.name), keep=keep, duplicates=[product]))
+        elif candidates:
+            plan.ambiguous.append(AmbiguousName(product=product, candidates=candidates))
+
+    for product in all_products:
+        if is_blocked(product):
+            sale_ids = select(Sale.id).where(Sale.product_id == product.id)
+            plan.blocked.append(
+                BlockedProduct(
+                    product=product,
+                    sales=session.scalar(select(func.count()).select_from(Sale).where(Sale.product_id == product.id)),
+                    purchases=session.scalar(
+                        select(func.count()).select_from(StockMovement).where(
+                            StockMovement.product_id == product.id, StockMovement.kind == MovementKind.PURCHASE
+                        )
+                    ),
+                    debts=session.scalar(select(func.count()).select_from(Debt).where(Debt.sale_id.in_(sale_ids))),
+                )
+            )
+    return plan
+
+
+def apply_cleanup(session: Session, plan: CleanupPlan) -> list[Product]:
+    """Merge, then delete unused blocked products. Returns the products deleted. The caller commits."""
+    deleted: list[Product] = []
+    for group in plan.same_key + plan.contained:
+        merge(session, group)
+        deleted += group.duplicates
+    for blocked in plan.blocked:
+        if not blocked.in_use:
+            # Only adjustments can be left (sales and purchases were counted): they go with it.
+            session.execute(delete(StockMovement).where(StockMovement.product_id == blocked.product.id))
+            session.delete(blocked.product)
+            deleted.append(blocked.product)
+    session.flush()
+    return deleted
 
 
 def merge(session: Session, group: DuplicateGroup) -> None:

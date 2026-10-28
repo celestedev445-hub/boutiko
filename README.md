@@ -151,12 +151,27 @@ Merchants name the same product in many ways. [`app/services/products.py`](app/s
 - **Not products**: words for the shop itself (*shop, boutique, magasin, comptoir, store*) are excluded in the prompt, and the ledger refuses to create a product named *shop(s), boutique(s), magasin(s), store(s), stock, produit(s), article(s), chose(s)* or shorter than 2 letters: it asks which product was meant instead. A stock question about an unknown product never creates one: *"Je ne connais pas encore X. Envoie un achat pour l'ajouter."*
 - **Known stock**: a product's stock is only followed once it has a starting point, a purchase or a count (*"j'ai 20 savons en stock"*, the `set_stock` action). Until then, its sales are recorded but don't touch the stock (no *"Reste : -3"*), and the merchant is asked once: *"💡 Dis-moi combien tu as de savons en stock pour que je le suive."* Products whose stock isn't followed never show as low or out of stock in the summary.
 
-Existing duplicates can be listed and merged per shop (sales and stock movements move to the kept product, debts follow their sales, stocks add up, in one transaction):
+Products recorded before these rules can be cleaned up per shop with [`scripts/merge_products.py`](scripts/merge_products.py):
+
+- **same name** (same product key: *savons* and *Savon*): merged into the most used one;
+- **contained name**: a name whose words are all in exactly **one** other product's name (*savon* → *Savon Azur*) is merged into that more precise product; with several candidates (*savon*: *Savon Azur*, *Savon Palmida*) it is only listed, and the merchant will be asked when they use it;
+- **blocked names** (*shop, boutique, magasin, store, stock, produit…*): deleted if nothing points to them (no sale, no purchase, no debt), otherwise listed as *to check*.
+
+A merge moves sales and stock movements to the kept product (debts follow their sales) and adds the stocks up. The script shows the products before, the plan, and with `--apply` the products after; everything runs in one transaction.
 
 ```bash
-python scripts/merge_products.py 237690001234            # list
-python scripts/merge_products.py 237690001234 --apply    # merge
+python scripts/merge_products.py 237690001234            # show the plan, change nothing
+python scripts/merge_products.py 237690001234 --apply    # apply it
 docker compose exec api python scripts/merge_products.py 237690001234   # with Docker
+```
+
+```
+Plan:
+  merge (same name)      'savons' -> 'Savon'
+  merge (contained name) 'savon' -> 'Savon Azur'
+  not merged             'riz': could be 'Riz parfumé', 'Riz long'
+  delete                 'shops': not a product name, unused
+  to check               'magasin': not a product name, but 1 sale(s), 0 purchase(s), 0 debt(s)
 ```
 
 Migration `0005` marks the stock as known for every product that was ever bought, brings the negative stock of the others back to 0 (with an adjustment movement), and recomputes the product keys; a key already taken in the shop is left for `merge_products.py`.
@@ -320,7 +335,7 @@ scripts/
   eval_voice.py      transcription accuracy against the real API
   eval_vision.py     photo reading accuracy against the real API
   demo_summary.py    show (or send) a shop's evening summary
-  merge_products.py  list and merge a shop's duplicate products
+  merge_products.py  merge duplicate products, remove names that are not products
 tests/               pytest suite (Meta API, Graph API and ffmpeg mocked, SQLite)
   data/phrases.json  evaluation dataset
   data/voice/        your recordings for eval_voice.py (git-ignored)
