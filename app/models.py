@@ -61,23 +61,25 @@ class Shop(Base):
     currency: Mapped[str] = mapped_column(String(3), default="XAF")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    products: Mapped[list["Product"]] = relationship(back_populates="shop")
-    customers: Mapped[list["Customer"]] = relationship(back_populates="shop")
+    # Children are removed by the database (ON DELETE CASCADE), not by the ORM.
+    products: Mapped[list["Product"]] = relationship(back_populates="shop", passive_deletes=True)
+    customers: Mapped[list["Customer"]] = relationship(back_populates="shop", passive_deletes=True)
 
 
 class Product(Base):
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("shop_id", "name"),)
+    __table_args__ = (UniqueConstraint("shop_id", "name_key", name="uq_products_shop_id_name_key"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
-    name: Mapped[str] = mapped_column(String(120))
+    name: Mapped[str] = mapped_column(String(120))  # as first written by the merchant
+    name_key: Mapped[str] = mapped_column(String(120))  # normalized, for lookups (see services.normalize)
     unit: Mapped[str] = mapped_column(String(20), default="piece")
     sale_price: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     shop: Mapped[Shop] = relationship(back_populates="products")
-    movements: Mapped[list["StockMovement"]] = relationship(back_populates="product")
+    movements: Mapped[list["StockMovement"]] = relationship(back_populates="product", passive_deletes=True)
 
 
 class StockMovement(Base):
@@ -100,16 +102,17 @@ class StockMovement(Base):
 
 class Customer(Base):
     __tablename__ = "customers"
-    __table_args__ = (UniqueConstraint("shop_id", "name"),)
+    __table_args__ = (UniqueConstraint("shop_id", "name_key", name="uq_customers_shop_id_name_key"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(120))
+    name_key: Mapped[str] = mapped_column(String(120))
     phone: Mapped[str | None] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     shop: Mapped[Shop] = relationship(back_populates="customers")
-    debts: Mapped[list["Debt"]] = relationship(back_populates="customer")
+    debts: Mapped[list["Debt"]] = relationship(back_populates="customer", passive_deletes=True)
 
 
 class Sale(Base):
@@ -120,8 +123,9 @@ class Sale(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="RESTRICT"), index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"))
     quantity: Mapped[Decimal] = mapped_column(Quantity)
-    unit_price: Mapped[int] = mapped_column(BigInteger)
-    total: Mapped[int] = mapped_column(BigInteger)
+    # None when the merchant gave no price and none is known for the product yet.
+    unit_price: Mapped[int | None] = mapped_column(BigInteger)
+    total: Mapped[int | None] = mapped_column(BigInteger)
     on_credit: Mapped[bool] = mapped_column(default=False)
     source_message_id: Mapped[str | None] = mapped_column(String(128))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -138,9 +142,21 @@ class Debt(Base):
     amount: Mapped[int] = mapped_column(BigInteger)
     sale_id: Mapped[int | None] = mapped_column(ForeignKey("sales.id", ondelete="SET NULL"))
     note: Mapped[str | None] = mapped_column(String(255))
+    source_message_id: Mapped[str | None] = mapped_column(String(128))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     customer: Mapped[Customer] = relationship(back_populates="debts")
+
+
+class ProcessedMessage(Base):
+    """One row per WhatsApp message applied to the ledger, so a redelivery is never applied twice."""
+
+    __tablename__ = "processed_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    message_id: Mapped[str] = mapped_column(String(128), unique=True)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 def current_stock(session: Session, product_id: int, at: datetime | None = None) -> Decimal:
@@ -150,7 +166,7 @@ def current_stock(session: Session, product_id: int, at: datetime | None = None)
     )
     if at is not None:
         query = query.where(StockMovement.occurred_at <= at)
-    return Decimal(session.scalar(query))
+    return Decimal(str(session.scalar(query)))
 
 
 def customer_balance(session: Session, customer_id: int) -> int:

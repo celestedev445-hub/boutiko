@@ -47,6 +47,8 @@ def _reply(message: Message) -> None:
     to = mask_phone(message.sender)
     try:
         reply = route(message)
+        if reply is None:
+            return
         client.send_text(message.sender, reply)
     except client.GraphAPIError as exc:
         logger.error(

@@ -7,6 +7,8 @@ import pytest
 from app.config import get_settings
 from tests.conftest import APP_SECRET, VERIFY_TOKEN
 
+pytestmark = pytest.mark.usefixtures("echo_handler")
+
 
 def _payload(message: dict) -> dict:
     return {

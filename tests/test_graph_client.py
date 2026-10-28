@@ -10,6 +10,8 @@ from app.logging_config import RedactSecretsFilter, mask_phone
 from app.whatsapp import client as wa_client
 from tests.test_webhook import _message, _payload
 
+pytestmark = pytest.mark.usefixtures("echo_handler")
+
 ACCESS_TOKEN = "EAAG-test-access-token"
 
 
