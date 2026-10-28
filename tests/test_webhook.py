@@ -87,14 +87,15 @@ def test_audio_message_goes_to_audio_handler(client, sent, monkeypatch):
     assert sent == [("237690000000", "ok")]
 
 
-def test_image_routes_to_receipt_by_default(client, sent):
-    client.post("/webhook", json=_payload(_message("image", image={"id": "MEDIA2"})))
-    assert "ticket" in sent[0][1]
+def test_image_message_goes_to_image_handler(client, sent, monkeypatch):
+    from app.whatsapp import router
 
-
-def test_image_with_shelf_caption_routes_to_shelf(client, sent):
-    client.post("/webhook", json=_payload(_message("image", image={"id": "MEDIA3", "caption": "Mon étagère"})))
-    assert "étagère" in sent[0][1]
+    seen = []
+    monkeypatch.setitem(router.HANDLERS, "image", lambda message: seen.append(message) or "ok")
+    image = {"id": "MEDIA2", "mime_type": "image/jpeg", "caption": "vendu 3 à 500"}
+    assert client.post("/webhook", json=_payload(_message("image", image=image))).status_code == 200
+    assert (seen[0].image.id, seen[0].image.mime_type, seen[0].image.caption) == ("MEDIA2", "image/jpeg", "vendu 3 à 500")
+    assert sent == [("237690000000", "ok")]
 
 
 def test_unsupported_type_gets_help_message(client, sent):

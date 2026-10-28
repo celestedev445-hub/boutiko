@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     model_api_key: str = ""
     model_api_base_url: str = "https://api.meta.ai/v1"
     model_text: str = "muse-spark-1.3-contributor"
+    model_vision: str = "muse-spark-1.3-contributor"  # photos: invoices, receipts, products
     model_asr: str = "muse-voice-transcribe-1.0"  # speech-to-text, POST /asr/transcribe
     model_asr_fallback: str = "muse-spark-1.2"  # chat model with audio input, used when ASR fails
 

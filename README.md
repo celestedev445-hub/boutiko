@@ -24,8 +24,8 @@ The shopkeeper sends whatever is easiest:
 |---|---|---|
 | Text | `vendu 3 savons Azur à 250` | Records the sale, removes 3 soaps from stock |
 | Voice note | *"Marie don take two kilo sugar for credit"* | Transcribes, records a credit sale and Marie's debt |
-| Receipt photo | Supplier's handwritten ticket | Reads each line, records the restock |
-| Shelf photo | Photo of the soap shelf, captioned *étagère* | Counts units, proposes a stock correction |
+| Invoice photo | Supplier's invoice or delivery note | Reads each line, asks "save it?", records the restock on YES |
+| Product photo | Photo of a soap, captioned *vendu 3 à 500* | Proposes the sale, records it on YES |
 
 Every evening the owner gets a short summary — sales, best sellers, low stock, who owes what — in French, English or Pidgin.
 
@@ -40,8 +40,8 @@ flowchart LR
         W["/webhook<br/>verify + signature check"] --> R{Router by<br/>message type}
         R -->|text| T[Text handler]
         R -->|audio| A[Voice handler]
-        R -->|image + receipt| RC[Receipt handler]
-        R -->|image + shelf| SH[Shelf handler]
+        R -->|image| RC[Photo handler]
+        RC --> PA[Pending action<br/>until YES / NO]
         J[Evening summary job]
     end
 
@@ -49,9 +49,8 @@ flowchart LR
     A -->|transcript| T
     T -->|muse-spark-1.3-contributor<br/>JSON extraction| M
     RC -->|muse-spark-1.3-contributor<br/>vision| M
-    SH -->|sam-3.1<br/>segmentation & count| M
 
-    T & RC & SH --> DB[(PostgreSQL)]
+    T & PA --> DB[(PostgreSQL)]
     J --> DB
     API -->|reply / summary| WA --> U
 ```
@@ -87,10 +86,10 @@ All calls go through the Meta Model API with an OpenAI-compatible client (`base_
 
 | Model | Used for |
 |---|---|
-| `muse-spark-1.3-contributor` (configurable with `MODEL_TEXT`) | Extracting structured actions (JSON) from text, reading receipt photos (vision), tool calls |
+| `muse-spark-1.3-contributor` (`MODEL_TEXT`, `MODEL_VISION`) | Extracting structured actions (JSON) from text, reading photos of invoices, receipts and products (vision) |
 | `muse-voice-transcribe-1.0` (`MODEL_ASR`) | Transcribing WhatsApp voice notes (`POST /asr/transcribe`) |
 | `muse-spark-1.2` (`MODEL_ASR_FALLBACK`) | Fallback transcription, chat completion with an audio input |
-| `sam-3.1` | Segmenting and counting products on a shelf photo |
+| `sam-3.1` | Planned: segmenting and counting products on a shelf photo |
 
 The extraction output is validated against a Pydantic schema ([`app/schemas.py`](app/schemas.py)): a list of actions, each with `action`, `product`, `quantity`, `unit`, `price` (unit price), `total_price` (line total) and `customer`, plus the detected `language`.
 
@@ -179,6 +178,54 @@ python scripts/eval_voice.py path/to/recordings
 
 For each file it prints the transcript from `MODEL_ASR` and from `MODEL_ASR_FALLBACK`, a word-level similarity score when a `.txt` exists, the extracted actions and how long each step took. Like the text evaluation, it calls the real API and is not run by `pytest`.
 
+## Photos
+
+A merchant can photograph a supplier invoice, a till receipt, a page of the sales notebook, or a product with a caption. What the model reads on a photo is **never recorded straight away**: Boutiko shows what it read and waits for YES or NO.
+
+```mermaid
+sequenceDiagram
+    participant M as Merchant (WhatsApp)
+    participant B as Boutiko
+    participant V as Meta vision model
+    participant L as Ledger (PostgreSQL)
+    M->>B: 📷 supplier invoice
+    B->>V: image + caption (strict JSON schema)
+    V-->>B: invoice: 2 purchases
+    B->>L: pending action (30 min), nothing in the ledger
+    B->>M: 🧾 recap + "Je l'enregistre ? Réponds OUI ou NON"
+    M->>B: OUI
+    B->>L: apply_extraction (photo's message id)
+    B->>M: 📦 10 cartons de lait concentré ajoutés au stock…
+```
+
+1. **Reception** ([`app/whatsapp/router.py`](app/whatsapp/router.py)): only JPEG, PNG and WebP up to 5 MB are accepted. The declared type is checked before downloading and the real type from the file's first bytes after; anything else gets a polite refusal.
+2. **Reading** ([`app/services/vision.py`](app/services/vision.py)): `chat.completions` with `MODEL_VISION`, the instruction, the caption if any and the image as a `data:` URL, `reasoning_effort="low"`, 60 s timeout, one retry on 429, 5xx and network errors. The response uses the **same strict JSON schema** as text extraction plus `image_kind` (`invoice`, `receipt`, `product`, `handwritten_note`, `other`) and `needs_clarification`. Invoices give one purchase per line, receipts and sales notebooks give sales and credit sales, and a product photo relies on its caption (*vendu 3 à 500*, *il me reste combien ?*). An unreadable price or quantity stays null and is asked about, never guessed.
+3. **Confirmation** ([`app/services/pending.py`](app/services/pending.py)): the actions are stored in `pending_actions` (expires after 30 minutes) and Boutiko replies with one line per action, the total and the question:
+
+   ```
+   🧾 Voici ce que j'ai lu :
+   • Achat : 10 cartons de lait concentré — 185 000 FCFA
+   • Achat : 5 sacs de riz — 115 000 FCFA
+   Total : 300 000 FCFA
+   Je l'enregistre ? Réponds OUI ou NON
+   ```
+
+   English: *Shall I save it? Reply YES or NO*; Pidgin: *Make I save am? Answer YES or NO*.
+4. **Answer**: a text or voice message that is just a YES (*oui, ok, d'accord, yes, yeah, na so, I gree, 👍…*) or a NO (*non, no, annule, cancel, no be so, 👎…*) applies or cancels the merchant's most recent pending action, without calling the model. The actions are recorded under the photo's message id, so a confirmed photo can never be recorded twice. With no pending action (or an expired one), the message is handled like any other.
+
+A photo without anything to record gets the model's question (*Tu as vendu ou acheté ce savon ?*) or a short help message, and nothing is stored. A stock question on a product photo is answered right away since it records nothing. The same photo delivered twice gives a single pending action.
+
+### Evaluating photo reading
+
+Put photos in [`tests/data/vision/`](tests/data/vision/README.md) (git-ignored, except its README), each optionally with a `.json` of the same name holding the caption to send and the expected `image_kind` and actions, then:
+
+```bash
+python scripts/eval_vision.py                    # tests/data/vision/
+python scripts/eval_vision.py path/to/photos -v
+```
+
+It prints the image kind, the actions read, the clarification question if any, the time taken and OK/KO against the `.json`. It calls the real API and is not run by `pytest`.
+
 ## Project layout
 
 ```
@@ -196,6 +243,8 @@ app/
     normalize.py     product and customer name keys
     audio.py         voice note -> WAV 16 kHz mono (ffmpeg)
     transcribe.py    speech-to-text with Meta models, with fallback
+    vision.py        photo reading with a Meta vision model
+    pending.py       actions waiting for YES / NO, answer parsing
   whatsapp/
     webhook.py       GET verification + POST reception
     router.py        dispatch by message type
@@ -207,9 +256,11 @@ scripts/
   dev.ps1            local stack + cloudflared tunnel
   eval_extraction.py extraction accuracy against the real API
   eval_voice.py      transcription accuracy against the real API
+  eval_vision.py     photo reading accuracy against the real API
 tests/               pytest suite (Meta API, Graph API and ffmpeg mocked, SQLite)
   data/phrases.json  evaluation dataset
   data/voice/        your recordings for eval_voice.py (git-ignored)
+  data/vision/       your photos for eval_vision.py (git-ignored)
 ```
 
 ## Getting started
@@ -242,6 +293,7 @@ Fill in `.env`. It is git-ignored — never commit it.
 | `MODEL_TEXT` | Text model, defaults to `muse-spark-1.3-contributor` |
 | `MODEL_ASR` | Speech-to-text model for voice notes, defaults to `muse-voice-transcribe-1.0` |
 | `MODEL_ASR_FALLBACK` | Chat model with audio input, used when `MODEL_ASR` fails, defaults to `muse-spark-1.2` |
+| `MODEL_VISION` | Vision model for photos, defaults to `muse-spark-1.3-contributor` |
 | `API_PORT` | Host port of the API with Docker, defaults to `8000` |
 
 ### 2a. Run with Docker
@@ -299,7 +351,7 @@ The fastest way to see the whole loop (WhatsApp → webhook → Meta Model API �
 
 4. **Subscribe to `messages`.** Still under **Webhook fields**, click **Subscribe** next to `messages`.
 
-5. **Send a test message.** In **WhatsApp → API Setup**, make sure your own number is listed as a recipient of the test number. Then send a WhatsApp message to the test number, for example `acheté 20 savons`, then `vendu 3 savons à 250`. You should get `✅ 3 savons vendus, 750 FCFA. Reste : 17.` back within a few seconds. Then try a voice note saying the same thing: the reply starts with `🎙️ J'ai compris : "…"`.
+5. **Send a test message.** In **WhatsApp → API Setup**, make sure your own number is listed as a recipient of the test number. Then send a WhatsApp message to the test number, for example `acheté 20 savons`, then `vendu 3 savons à 250`. You should get `✅ 3 savons vendus, 750 FCFA. Reste : 17.` back within a few seconds. Then try a voice note saying the same thing: the reply starts with `🎙️ J'ai compris : "…"`. Finally, send a photo of an invoice: Boutiko shows what it read and asks *Je l'enregistre ?*; answer `OUI`.
 
 Watch what happens with `docker compose logs -f api`:
 
@@ -340,7 +392,7 @@ Then, in the [Meta app dashboard](https://developers.facebook.com/apps/):
    - Verify token: the value of `WHATSAPP_VERIFY_TOKEN`
    - Click **Verify and save**. Meta calls `GET /webhook`; the API answers with the challenge.
 3. In **Webhook fields**, subscribe to `messages`.
-4. Send a message to the test number from your phone. Text messages and voice notes go through the full pipeline; photos only get an acknowledgement for now.
+4. Send a message to the test number from your phone. Text messages, voice notes and photos go through the full pipeline.
 
 Quick tunnel URLs change on every restart — update the callback URL in the dashboard when they do. Temporary access tokens expire after about 24 hours; use a system-user token for anything longer-lived.
 
@@ -353,7 +405,7 @@ curl "https://<your-tunnel-host>/webhook?hub.mode=subscribe&hub.verify_token=<yo
 
 ## Status
 
-Working today: the full pipeline for **text messages and voice notes** (Meta speech-to-text with fallback, extraction, ledger, replies in French, English and Pidgin), webhook verification and signatures, deduplication, data model and migrations. Next: receipt and shelf photos, the evening summary, and letting the merchant name their shop. Open questions about the Meta Model API (image input, SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
+Working today: **text messages, voice notes and photos** (Meta speech-to-text with fallback, Meta vision with confirmation before saving, extraction, ledger, replies in French, English and Pidgin), webhook verification and signatures, deduplication, data model and migrations. Next: the evening summary, shelf counting with SAM, and letting the merchant name their shop. Open questions about the Meta Model API (SAM) are marked `TODO` in [`app/meta_client.py`](app/meta_client.py).
 
 ## Security
 

@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    JSON,
     Numeric,
     String,
     UniqueConstraint,
@@ -44,6 +45,13 @@ class MovementKind(str, enum.Enum):
     SALE = "sale"
     ADJUSTMENT = "adjustment"  # manual correction or shelf-count reconciliation
     LOSS = "loss"  # spoiled, broken, stolen
+
+
+class PendingStatus(str, enum.Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class DebtKind(str, enum.Enum):
@@ -157,6 +165,21 @@ class ProcessedMessage(Base):
     shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
     message_id: Mapped[str] = mapped_column(String(128), unique=True)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PendingAction(Base):
+    """Actions read on a photo, waiting for the merchant to answer YES or NO before they're recorded."""
+
+    __tablename__ = "pending_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
+    wa_id: Mapped[str] = mapped_column(String(20), index=True)  # WhatsApp id of the merchant who sent the photo
+    source_message_id: Mapped[str] = mapped_column(String(128), unique=True)
+    payload: Mapped[dict] = mapped_column(JSON)  # Extraction.model_dump(mode="json")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[PendingStatus] = mapped_column(_enum(PendingStatus), default=PendingStatus.PENDING)
 
 
 def current_stock(session: Session, product_id: int, at: datetime | None = None) -> Decimal:

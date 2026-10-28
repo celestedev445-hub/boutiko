@@ -62,6 +62,27 @@ class Extraction(BaseModel):
     )
 
 
+class ImageKind(str, Enum):
+    INVOICE = "invoice"  # supplier invoice or delivery note
+    RECEIPT = "receipt"  # till receipt or sales notebook
+    PRODUCT = "product"  # photo of goods
+    HANDWRITTEN_NOTE = "handwritten_note"
+    OTHER = "other"
+
+
+class VisionExtraction(Extraction):
+    """What the model reads on a photo: the same actions as text, plus what the photo is."""
+
+    image_kind: ImageKind = Field(description="What the photo shows")
+    needs_clarification: str = Field(
+        default="",
+        description="Short question for the merchant, in their language, when something is missing or unreadable; empty otherwise",
+    )
+
+    def as_extraction(self) -> Extraction:
+        return Extraction(actions=self.actions, language=self.language)
+
+
 # Keywords the strict structured-output mode doesn't need; Pydantic enforces the constraints anyway.
 _DROPPED_KEYS = {"title", "default", "exclusiveMinimum", "minimum"}
 

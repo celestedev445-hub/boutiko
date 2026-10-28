@@ -33,3 +33,7 @@ Boutiko-dossier-projet.pdf
 # Voice recordings for scripts/eval_voice.py (personal data, keep local)
 tests/data/voice/*
 !tests/data/voice/README.md
+
+# Photos for scripts/eval_vision.py (personal data, keep local)
+tests/data/vision/*
+!tests/data/vision/README.md

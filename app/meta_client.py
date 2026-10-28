@@ -4,12 +4,12 @@ Verified against the API: base URL https://api.meta.ai/v1, chat.completions,
 strict json_schema structured output, and reasoning_effort (the text model
 reasons; "none" is rejected with a 400, so we use "low").
 
-Voice notes are transcribed in app/services/transcribe.py.
+Voice notes are transcribed in app/services/transcribe.py and photos are
+read in app/services/vision.py.
 
-TODO: still unverified — image input format and the SAM endpoint.
+TODO: still unverified — the SAM endpoint.
 """
 
-import base64
 import logging
 from functools import lru_cache
 
@@ -131,18 +131,6 @@ def _extract(user_content) -> Extraction:
 
 def extract_from_text(text: str) -> Extraction:
     return _extract(text)
-
-
-def extract_from_receipt(image: bytes, mime_type: str = "image/jpeg") -> Extraction:
-    """Read a supplier receipt / handwritten ticket photo."""
-    # TODO: check the accepted image input format (data URL vs uploaded file id) and size limits.
-    data_url = f"data:{mime_type};base64,{base64.b64encode(image).decode()}"
-    return _extract(
-        [
-            {"type": "text", "text": "This is a supplier receipt. Extract each line as a purchase."},
-            {"type": "image_url", "image_url": {"url": data_url}},
-        ]
-    )
 
 
 def count_shelf(image: bytes, product_hints: list[str]) -> dict[str, int]:

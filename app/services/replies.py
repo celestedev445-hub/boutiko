@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from app.models import Language
-from app.schemas import Action
+from app.schemas import Action, ExtractedAction, Extraction
 from app.services.ledger import ActionResult, LedgerResult, LedgerWarning
 
 FR, EN, PCM = Language.FR, Language.EN, Language.PIDGIN
@@ -124,6 +124,66 @@ TEXTS: dict[str, dict[Language, str]] = {
         EN: "🎙️ I couldn't listen to your voice note. Try again in a moment, or type your message.",
         PCM: "🎙️ I no fit listen your voice note. Try again small time, or write the message.",
     },
+    "summary_header": {
+        FR: "🧾 Voici ce que j'ai lu :",
+        EN: "🧾 Here's what I read:",
+        PCM: "🧾 See wetin I read:",
+    },
+    "summary_purchase": {FR: "• Achat : {item}{amount}", EN: "• Purchase: {item}{amount}", PCM: "• Buy: {item}{amount}"},
+    "summary_sale": {FR: "• Vente : {item}{amount}", EN: "• Sale: {item}{amount}", PCM: "• Sell: {item}{amount}"},
+    "summary_credit_sale": {
+        FR: "• Crédit pour {customer} : {item}{amount}",
+        EN: "• Credit for {customer}: {item}{amount}",
+        PCM: "• Credit for {customer}: {item}{amount}",
+    },
+    "summary_debt_payment": {
+        FR: "• Remboursement de {customer}{amount}",
+        EN: "• Payment from {customer}{amount}",
+        PCM: "• {customer} pay{amount}",
+    },
+    "summary_stock_check": {FR: "• Stock de {product}", EN: "• Stock of {product}", PCM: "• Stock for {product}"},
+    "price_unknown": {FR: "prix ?", EN: "price?", PCM: "price?"},
+    "summary_total": {FR: "Total : {total}", EN: "Total: {total}", PCM: "Total: {total}"},
+    "summary_total_partial": {
+        FR: "Total : {total} (sans les lignes sans prix)",
+        EN: "Total: {total} (lines without a price not included)",
+        PCM: "Total: {total} (the ones wey no get price no dey inside)",
+    },
+    "summary_question": {
+        FR: "Je l'enregistre ? Réponds OUI ou NON",
+        EN: "Shall I save it? Reply YES or NO",
+        PCM: "Make I save am? Answer YES or NO",
+    },
+    "cancelled": {
+        FR: "❌ Annulé, je n'ai rien enregistré.",
+        EN: "❌ Cancelled, nothing was saved.",
+        PCM: "❌ I don cancel am, I no save anything.",
+    },
+    "already_saved": {
+        FR: "✅ C'est déjà enregistré.",
+        EN: "✅ That's already saved.",
+        PCM: "✅ I don already save am.",
+    },
+    "photo_nothing": {
+        FR: "🖼️ Je n'ai rien trouvé à enregistrer sur cette photo. Envoie une facture, un ticket, ou une photo de produit avec une légende comme « vendu 3 à 500 ».",
+        EN: "🖼️ I found nothing to record on this photo. Send an invoice, a receipt, or a product photo with a caption like \"sold 3 at 500\".",
+        PCM: "🖼️ I no see anything to record for this photo. Send invoice, receipt, or product photo with caption like \"I sell 3, 500 each\".",
+    },
+    "photo_unsupported": {
+        FR: "🖼️ Je lis seulement les photos JPEG, PNG ou WebP. Envoie une photo de la facture ou du produit.",
+        EN: "🖼️ I can only read JPEG, PNG or WebP photos. Send a photo of the invoice or the product.",
+        PCM: "🖼️ I fit read only JPEG, PNG or WebP photo. Send photo of the invoice or the product.",
+    },
+    "photo_too_large": {
+        FR: "🖼️ Cette photo est trop lourde pour moi (5 Mo maximum). Envoie-la en qualité normale.",
+        EN: "🖼️ This photo is too big for me (5 MB max). Send it in normal quality.",
+        PCM: "🖼️ This photo too big for me (5 MB max). Send am for normal quality.",
+    },
+    "photo_failed": {
+        FR: "🖼️ Je n'ai pas pu lire ta photo. Réessaie dans un instant, ou écris ton message.",
+        EN: "🖼️ I couldn't read your photo. Try again in a moment, or type your message.",
+        PCM: "🖼️ I no fit read your photo. Try again small time, or write the message.",
+    },
     "apology": {
         FR: "Je n'ai pas pu lire ton message, réessaie dans un instant.",
         EN: "I couldn't read your message, please try again in a moment.",
@@ -172,6 +232,8 @@ def _item(result: ActionResult, language: Language) -> str:
     if result.unit:
         unit = _plural(result.unit, result.quantity, language)
         joiner = {FR: " de ", EN: " of ", PCM: " "}[language]
+        if language == FR and product[:1].lower() in "aeiouhâéèêîôœ" and product:
+            joiner = " d'"  # 3 bidons d'huile
         return f"{quantity} {unit}{joiner}{product}"
     first, _, rest = product.partition(" ")
     return f"{quantity} {_plural(first, result.quantity, language)}{' ' + rest if rest else ''}"
@@ -265,3 +327,74 @@ def voice_too_long(language: Language) -> str:
 
 def voice_failed(language: Language) -> str:
     return _t("voice_failed", language)
+
+
+def _line_amount(action: ExtractedAction) -> int | None:
+    """What the line will cost or bring, as the ledger will record it."""
+    if action.total_price is not None:
+        return action.total_price
+    if action.price is not None and action.quantity is not None:
+        return int((action.price * action.quantity).to_integral_value())
+    if action.price is not None:
+        return action.price
+    return None
+
+
+def _summary_line(action: ExtractedAction, language: Language) -> str | None:
+    if action.action == Action.UNKNOWN:
+        return None
+    if action.action == Action.STOCK_CHECK:
+        return _t("summary_stock_check", language, product=action.product or "?")
+    amount = _line_amount(action)
+    amount_text = format_amount(amount) if amount is not None else _t("price_unknown", language)
+    if action.action == Action.DEBT_PAYMENT:
+        return _t("summary_debt_payment", language, customer=action.customer or "?", amount=f" — {amount_text}")
+    if action.quantity is not None:
+        item = _item(ActionResult(action=action.action, product=action.product or "?", unit=action.unit, quantity=action.quantity), language)
+    else:
+        item = action.product or "?"
+    key = f"summary_{action.action.value}"
+    return _t(key, language, item=item, amount=f" — {amount_text}", customer=action.customer or "?")
+
+
+def pending_summary(extraction: Extraction, language: Language, clarification: str = "") -> str:
+    """Recap of what was read on a photo, then the YES / NO question."""
+    lines = [_t("summary_header", language)]
+    lines += [line for a in extraction.actions if (line := _summary_line(a, language))]
+    goods = [a for a in extraction.actions if a.action in (Action.SALE, Action.CREDIT_SALE, Action.PURCHASE)]
+    amounts = [amount for a in goods if (amount := _line_amount(a)) is not None]
+    if amounts:
+        key = "summary_total" if len(amounts) == len(goods) else "summary_total_partial"
+        lines.append(_t(key, language, total=format_amount(sum(amounts))))
+    if clarification:
+        lines.append(f"⚠️ {clarification.strip()}")
+    lines.append(_t("summary_question", language))
+    return "\n".join(lines)
+
+
+def clarification(question: str) -> str:
+    return f"❓ {question.strip()}"
+
+
+def cancelled(language: Language) -> str:
+    return _t("cancelled", language)
+
+
+def already_saved(language: Language) -> str:
+    return _t("already_saved", language)
+
+
+def photo_nothing(language: Language) -> str:
+    return _t("photo_nothing", language)
+
+
+def photo_unsupported(language: Language) -> str:
+    return _t("photo_unsupported", language)
+
+
+def photo_too_large(language: Language) -> str:
+    return _t("photo_too_large", language)
+
+
+def photo_failed(language: Language) -> str:
+    return _t("photo_failed", language)

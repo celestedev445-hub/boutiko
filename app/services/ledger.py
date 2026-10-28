@@ -70,7 +70,7 @@ def apply_extraction(session: Session, owner_phone: str, extraction: Extraction,
     on any error. A message id that was already applied is not applied again.
     """
     try:
-        shop = _get_or_create_shop(session, owner_phone, extraction.language)
+        shop = get_or_create_shop(session, owner_phone, extraction.language)
         language = Language(extraction.language) if extraction.language else shop.language
         if _already_processed(session, message_id):
             return LedgerResult(shop_id=shop.id, language=language, duplicate=True)
@@ -102,7 +102,8 @@ def _already_processed(session: Session, message_id: str) -> bool:
     return session.scalar(select(ProcessedMessage.id).where(ProcessedMessage.message_id == message_id)) is not None
 
 
-def _get_or_create_shop(session: Session, owner_phone: str, language: str | None) -> Shop:
+def get_or_create_shop(session: Session, owner_phone: str, language: str | None) -> Shop:
+    """The merchant's shop, created on their first message."""
     shop = session.scalar(select(Shop).where(Shop.owner_phone == owner_phone))
     if shop is None:
         # Provisional name until the merchant tells us the shop's name.

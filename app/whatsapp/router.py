@@ -12,19 +12,16 @@ from sqlalchemy import select
 from app import db, meta_client
 from app.logging_config import mask_phone
 from app.models import Language, Shop
-from app.services import audio, ledger, replies, transcribe
+from app.schemas import Action, Extraction
+from app.services import audio, ledger, pending, replies, transcribe, vision
 from app.whatsapp import media
 from app.whatsapp.client import GraphAPIError
 from app.whatsapp.payload import Message
 
 logger = logging.getLogger(__name__)
 
-SHELF_KEYWORDS = ("etagere", "étagère", "rayon", "shelf", "inventaire", "count")
-
-
-def is_shelf_photo(caption: str | None) -> bool:
-    # TODO: let muse-spark classify the photo (receipt vs shelf) instead of relying on the caption.
-    return bool(caption) and any(k in caption.lower() for k in SHELF_KEYWORDS)
+# Actions that only read the ledger: answered right away, no YES / NO needed.
+READ_ONLY_ACTIONS = {Action.STOCK_CHECK, Action.UNKNOWN}
 
 
 def _shop_language(owner_phone: str) -> Language:
@@ -53,11 +50,46 @@ def _with_heard(reply: str, transcript: str | None, language: Language) -> str:
     return replies.heard(transcript, language) + "\n" + reply
 
 
+def _answer_pending(message: Message, decision: pending.Decision) -> tuple[str, Language] | None:
+    """Apply or cancel the merchant's latest pending action. None if they have none (or it expired)."""
+    sender = mask_phone(message.sender)
+    try:
+        with db.SessionLocal() as session:
+            waiting = pending.latest_active(session, message.sender)
+            if waiting is None:
+                session.commit()  # keep the expired statuses
+                return None
+            language = pending.language_of(waiting, session.get(Shop, waiting.shop_id).language)
+            pending_id = waiting.id
+            if decision == pending.Decision.NO:
+                pending.cancel(session, waiting)
+                logger.info("Pending action %s cancelled by %s", pending_id, sender)
+                return replies.cancelled(language), language
+            result = pending.confirm(session, waiting)
+    except Exception:
+        logger.exception("Could not answer the pending action of %s", sender)
+        language = _shop_language(message.sender)
+        return replies.apology(language), language
+
+    logger.info("Pending action %s confirmed by %s", pending_id, sender)
+    if result.duplicate:
+        return replies.already_saved(language), language
+    return replies.confirmation(result), result.language
+
+
 def _process_text(message: Message, text: str, transcript: str | None = None) -> str | None:
     """Extraction -> ledger -> reply, shared by text messages and transcribed voice notes.
 
+    A plain YES / NO answers the latest pending photo instead, without calling the model.
     With a transcript, the reply starts with what was understood.
     """
+    decision = pending.parse_decision(text)
+    if decision is not None:
+        answer = _answer_pending(message, decision)
+        if answer is not None:
+            reply, language = answer
+            return _with_heard(reply, transcript, language)
+
     sender = mask_phone(message.sender)
     try:
         extraction = meta_client.extract_from_text(text)
@@ -70,6 +102,12 @@ def _process_text(message: Message, text: str, transcript: str | None = None) ->
         "Extracted %d action(s) from message %s: %s",
         len(extraction.actions), message.id, ", ".join(a.action.value for a in extraction.actions) or "none",
     )
+    return _record(message, extraction, transcript)
+
+
+def _record(message: Message, extraction: Extraction, transcript: str | None = None) -> str | None:
+    """Apply the actions to the ledger and confirm them to the merchant."""
+    sender = mask_phone(message.sender)
     try:
         with db.SessionLocal() as session:
             result = ledger.apply_extraction(session, message.sender, extraction, message.id)
@@ -122,20 +160,75 @@ def handle_audio(message: Message) -> str | None:
     return _process_text(message, transcription.text, transcript=transcription.text)
 
 
-def handle_receipt_photo(message: Message) -> str:
-    # TODO: download_media -> meta_client.extract_from_receipt -> record purchases
-    return "Photo de ticket reçue 🧾"
+def _photo_already_handled(message_id: str) -> bool:
+    try:
+        with db.SessionLocal() as session:
+            return pending.exists_for_message(session, message_id) or ledger.is_processed(session, message_id)
+    except Exception:
+        logger.exception("Could not check whether photo %s was already handled", message_id)
+        return False
 
 
-def handle_shelf_photo(message: Message) -> str:
-    # TODO: download_media -> meta_client.count_shelf -> propose stock adjustments
-    return "Photo d'étagère reçue 📦"
+def handle_image(message: Message) -> str | None:
+    """Photo: download -> vision model -> recap and YES / NO question (nothing recorded yet)."""
+    sender = mask_phone(message.sender)
+    if _photo_already_handled(message.id):
+        logger.info("Photo %s was already handled, no reply", message.id)
+        return None
+    language = _shop_language(message.sender)
 
+    declared = (message.image.mime_type or "").split(";")[0].strip().lower()
+    if declared not in vision.SUPPORTED_MIME_TYPES:
+        logger.info("Photo %s from %s refused: type %s", message.id, sender, declared or "unknown")
+        return replies.photo_unsupported(language)
+    try:
+        data = media.download_media(message.image.id, max_bytes=vision.MAX_IMAGE_BYTES)
+    except media.MediaTooLargeError as exc:
+        logger.info("Photo %s from %s refused: %s", message.id, sender, exc)
+        return replies.photo_too_large(language)
+    except (GraphAPIError, httpx.HTTPError) as exc:
+        logger.error("Could not download photo %s from %s: %s", message.id, sender, exc)
+        return replies.photo_failed(language)
+    mime_type = vision.sniff_mime_type(data)  # trust the bytes, not the label
+    if mime_type is None:
+        logger.info("Photo %s from %s refused: not a JPEG, PNG or WebP file", message.id, sender)
+        return replies.photo_unsupported(language)
 
-def handle_image(message: Message) -> str:
-    if is_shelf_photo(message.image.caption):
-        return handle_shelf_photo(message)
-    return handle_receipt_photo(message)
+    try:
+        reading = vision.analyze_image(data, mime_type, message.image.caption, language)
+    except vision.VisionError as exc:
+        logger.error("Vision failed for photo %s from %s: %s", message.id, sender, exc)
+        return replies.photo_failed(language)
+
+    # The caption and what was read are personal data: log only their shape.
+    logger.info(
+        "Photo %s: %s, %d action(s): %s%s",
+        message.id, reading.image_kind.value, len(reading.actions),
+        ", ".join(a.action.value for a in reading.actions) or "none",
+        ", needs clarification" if reading.needs_clarification.strip() else "",
+    )
+    if reading.language:
+        language = Language(reading.language)
+    actions = [a for a in reading.actions if a.action != Action.UNKNOWN]
+    extraction = Extraction(actions=actions, language=reading.language)
+
+    if all(a.action in READ_ONLY_ACTIONS for a in actions):
+        if actions:  # e.g. a product photo captioned "il me reste combien ?"
+            return _record(message, extraction)
+        if reading.needs_clarification.strip():
+            return replies.clarification(reading.needs_clarification)
+        return replies.photo_nothing(language)
+
+    try:
+        with db.SessionLocal() as session:
+            created = pending.create(session, message.sender, extraction, message.id)
+    except Exception:
+        logger.exception("Could not store the pending action of photo %s from %s", message.id, sender)
+        return replies.photo_failed(language)
+    if created is None:
+        logger.info("Photo %s already has a pending action, no reply", message.id)
+        return None
+    return replies.pending_summary(extraction, language, reading.needs_clarification)
 
 
 def handle_unsupported(message: Message) -> str:
