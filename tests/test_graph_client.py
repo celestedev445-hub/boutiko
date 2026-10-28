@@ -39,7 +39,8 @@ def test_echo_is_posted_to_graph_messages_endpoint(client, graph):
     client.post("/webhook", json=_payload(_message("text", text={"body": "Bonsoir"})))
 
     assert len(calls) == 1
-    assert calls[0]["url"] == "https://graph.facebook.com/v21.0/1234567890/messages"
+    # Sent from the number that received the message (webhook metadata), not WHATSAPP_PHONE_NUMBER_ID.
+    assert calls[0]["url"] == "https://graph.facebook.com/v21.0/123/messages"
     assert calls[0]["headers"] == {"Authorization": f"Bearer {ACCESS_TOKEN}"}
     assert calls[0]["json"] == {
         "messaging_product": "whatsapp",
@@ -92,3 +93,22 @@ def test_access_log_redacts_verify_token():
     message = record.getMessage()
     assert "s3cret" not in message
     assert "hub.verify_token=***&hub.challenge=42" in message
+
+
+def test_reply_without_metadata_uses_the_configured_number(client, graph):
+    calls, _ = graph
+    payload = _payload(_message("text", text={"body": "Bonsoir"}))
+    del payload["entry"][0]["changes"][0]["value"]["metadata"]
+    client.post("/webhook", json=payload)
+
+    assert [c["url"] for c in calls] == ["https://graph.facebook.com/v21.0/1234567890/messages"]
+
+
+def test_send_text_without_phone_number_id_uses_the_setting(graph):
+    calls, _ = graph
+    wa_client.send_text("237690000000", "Bonsoir")
+    wa_client.send_text("237690000000", "Bonsoir", phone_number_id="999")
+    assert [c["url"] for c in calls] == [
+        "https://graph.facebook.com/v21.0/1234567890/messages",
+        "https://graph.facebook.com/v21.0/999/messages",
+    ]

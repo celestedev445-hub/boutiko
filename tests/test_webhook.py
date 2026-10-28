@@ -138,7 +138,7 @@ def test_signature_not_checked_without_secret(client, sent):
 
 
 def test_send_failure_still_returns_200(client, monkeypatch):
-    def boom(to, body):
+    def boom(to, body, phone_number_id=None):
         raise RuntimeError("Graph API down")
 
     monkeypatch.setattr("app.whatsapp.client.send_text", boom)
@@ -172,3 +172,29 @@ def test_bad_or_missing_signature_is_rejected(client, sent, monkeypatch):
     assert _signed_post(client, body, "sha256=deadbeef").status_code == 403
     assert _signed_post(client, body, None).status_code == 403
     assert sent == []
+
+
+# --- Receiving number ---
+
+
+def test_messages_carry_the_phone_number_id_of_their_change():
+    from app.whatsapp.payload import WebhookPayload
+
+    payload = _payload(_message("text", id_="wamid.A", text={"body": "a"}))
+    other = _payload(_message("text", id_="wamid.B", text={"body": "b"}))["entry"][0]["changes"][0]
+    other["value"]["metadata"] = {"display_phone_number": "237622510967", "phone_number_id": "456"}
+    payload["entry"][0]["changes"].append(other)
+
+    messages = WebhookPayload.model_validate(payload).messages()
+    assert [(m.id, m.phone_number_id) for m in messages] == [("wamid.A", "123"), ("wamid.B", "456")]
+
+
+def test_reply_is_sent_from_the_receiving_number(client, monkeypatch):
+    calls = []
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "configured")
+    monkeypatch.setattr(
+        "app.whatsapp.client.send_text",
+        lambda to, body, phone_number_id=None: calls.append((to, phone_number_id)),
+    )
+    client.post("/webhook", json=_payload(_message("text", text={"body": "hi"})))
+    assert calls == [("237690000000", "123")]

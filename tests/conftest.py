@@ -35,7 +35,9 @@ def settings(monkeypatch):
 def sent(monkeypatch):
     """Capture outgoing WhatsApp messages instead of calling the Graph API."""
     messages: list[tuple[str, str]] = []
-    monkeypatch.setattr("app.whatsapp.client.send_text", lambda to, body: messages.append((to, body)))
+    monkeypatch.setattr(
+        "app.whatsapp.client.send_text", lambda to, body, phone_number_id=None: messages.append((to, body))
+    )
     return messages
 
 

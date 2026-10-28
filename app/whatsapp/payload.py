@@ -29,6 +29,8 @@ class Message(_Model):
     text: Text | None = None
     audio: Media | None = None
     image: Media | None = None
+    # Not in Meta's message object: copied from the change's metadata by WebhookPayload.messages().
+    phone_number_id: str | None = None
 
 
 class Status(_Model):
@@ -38,8 +40,16 @@ class Status(_Model):
     status: str
 
 
+class Metadata(_Model):
+    """The business number that received the change."""
+
+    display_phone_number: str | None = None
+    phone_number_id: str | None = None
+
+
 class Value(_Model):
     messaging_product: str | None = None
+    metadata: Metadata | None = None
     messages: list[Message] = []
     statuses: list[Status] = []
 
@@ -59,7 +69,13 @@ class WebhookPayload(_Model):
     entry: list[Entry] = []
 
     def messages(self) -> list[Message]:
-        return [m for e in self.entry for c in e.changes for m in c.value.messages]
+        """Incoming messages, each tagged with the phone_number_id of the number that received it."""
+        result = []
+        for entry in self.entry:
+            for change in entry.changes:
+                receiver = change.value.metadata.phone_number_id if change.value.metadata else None
+                result += [m.model_copy(update={"phone_number_id": receiver}) for m in change.value.messages]
+        return result
 
     def statuses(self) -> list[Status]:
         return [s for e in self.entry for c in e.changes for s in c.value.statuses]

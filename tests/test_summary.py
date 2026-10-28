@@ -474,7 +474,7 @@ def test_not_sent_after_manual_request(client, session_factory, evening, sent, n
 def test_send_failure_is_retried(session_factory, evening, now, monkeypatch):
     attempts = []
 
-    def flaky(to, body):
+    def flaky(to, body, phone_number_id=None):
         attempts.append(body)
         if len(attempts) == 1:
             raise RuntimeError("Graph API down")
@@ -567,6 +567,36 @@ def test_inbound_message_updates_the_window(client, sent, session_factory, now, 
     send(client, "le marché est calme")
     with session_factory() as session:
         assert clock.as_utc(shop_of(session).last_message_at) == local(TODAY, 9, 15)
+
+
+def test_inbound_message_stores_the_receiving_number(client, sent, session_factory, now, extractor):
+    send(client, "le marché est calme")
+    with session_factory() as session:
+        assert shop_of(session).phone_number_id == "123"  # metadata of tests.test_webhook._payload
+
+    # A message without metadata keeps the number already known.
+    payload = _payload(_message("text", id_="wamid.NOMETA", text={"body": "toujours calme"}))
+    del payload["entry"][0]["changes"][0]["value"]["metadata"]
+    client.post("/webhook", json=payload)
+    with session_factory() as session:
+        assert shop_of(session).phone_number_id == "123"
+
+
+@pytest.mark.parametrize(("stored", "expected"), [("456", "456"), (None, None)])
+def test_evening_summary_is_sent_from_the_merchants_last_number(
+    session_factory, session, evening, now, monkeypatch, stored, expected
+):
+    """None lets client.send_text fall back to WHATSAPP_PHONE_NUMBER_ID."""
+    calls = []
+    monkeypatch.setattr(
+        "app.whatsapp.client.send_text",
+        lambda to, body, phone_number_id=None: calls.append((to, phone_number_id)),
+    )
+    evening.phone_number_id = stored
+    session.commit()
+    now.value = local(TODAY, 20, 0)
+    assert daily.run_due_summaries() == 1
+    assert calls == [(PHONE, expected)]
 
 
 def test_scheduler_starts_with_the_app_only_when_enabled(monkeypatch):

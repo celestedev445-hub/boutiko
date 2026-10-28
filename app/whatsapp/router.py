@@ -311,7 +311,7 @@ HANDLERS: dict[str, Callable[[Message], str | None]] = {
 def _after_inbound(message: Message) -> str | None:
     try:
         with db.SessionLocal() as session:
-            return daily.after_inbound(session, message.sender)
+            return daily.after_inbound(session, message.sender, message.phone_number_id)
     except Exception as exc:  # no traceback: SQL errors would print the phone number
         logger.error("Could not note the last message of %s: %s", mask_phone(message.sender), type(exc).__name__)
         return None

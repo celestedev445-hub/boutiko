@@ -128,13 +128,16 @@ def set_summary_hour(session: Session, owner_phone: str, hour: int, asked_in: La
     return hour_set(hour, language), language
 
 
-def after_inbound(session: Session, owner_phone: str) -> str | None:
-    """Note the merchant's message (24 h window) and, if a summary was skipped, the line offering it."""
+def after_inbound(session: Session, owner_phone: str, phone_number_id: str | None = None) -> str | None:
+    """Note the merchant's message (24 h window, number it was sent to) and, if a summary was skipped,
+    the line offering it."""
     shop = session.scalar(select(Shop).where(Shop.owner_phone == owner_phone))
     if shop is None:
         return None
     now = clock.now()
     shop.last_message_at = now
+    if phone_number_id:
+        shop.phone_number_id = phone_number_id
     line = None
     skipped = shop.summary_skipped_day
     if skipped is not None:
@@ -174,7 +177,7 @@ def _send_if_due(shop_id: int, now: datetime) -> bool:
             return False
         text = write_summary(build_daily_summary(session, shop, day), shop.language)
         try:
-            client.send_text(shop.owner_phone, text)
+            client.send_text(shop.owner_phone, text, phone_number_id=shop.phone_number_id)
         except Exception as exc:
             logger.error("Shop %s: summary not sent (%s), will retry", shop.id, exc)
             session.delete(claim)

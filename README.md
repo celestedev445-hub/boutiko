@@ -371,7 +371,7 @@ Fill in `.env`. It is git-ignored — never commit it.
 | `DATABASE_URL` | Only needed when running without Docker, e.g. `postgresql+psycopg://user:pass@localhost:5432/boutiko` |
 | `WHATSAPP_VERIFY_TOKEN` | Any random string you choose; you'll paste the same one in the Meta dashboard |
 | `WHATSAPP_ACCESS_TOKEN` | Meta app dashboard → WhatsApp → API Setup |
-| `WHATSAPP_PHONE_NUMBER_ID` | Same page — the *ID* of the test number, not the number itself |
+| `WHATSAPP_PHONE_NUMBER_ID` | Same page — the *ID* of the test number, not the number itself. Replies go out from the number that received the message (`metadata.phone_number_id` of the webhook); this one is only the default, for messages with no incoming one |
 | `WHATSAPP_APP_SECRET` | App settings → Basic. Enables `X-Hub-Signature-256` checks; leave empty to skip locally |
 | `WHATSAPP_API_VERSION` | Graph API version, defaults to `v21.0` |
 | `MODEL_API_KEY` | Meta Model API key |

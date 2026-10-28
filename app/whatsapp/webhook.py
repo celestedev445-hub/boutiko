@@ -49,7 +49,7 @@ def _reply(message: Message) -> None:
         reply = route(message)
         if reply is None:
             return
-        client.send_text(message.sender, reply)
+        client.send_text(message.sender, reply, phone_number_id=message.phone_number_id)
     except client.GraphAPIError as exc:
         logger.error(
             "Graph API error replying to %s (message %s): HTTP %s, code %s: %s",

@@ -72,7 +72,7 @@ def main() -> int:
             print("warning: amounts not in the figures:", unknown_amounts(text, figures))
 
         if args.send:
-            client.send_text(shop.owner_phone, text)
+            client.send_text(shop.owner_phone, text, phone_number_id=shop.phone_number_id)
             daily.record_summary(session, shop, day, SummaryChannel.MANUAL, clock.now())
             print(f"Sent to {mask_phone(shop.owner_phone)} and recorded as a manual summary.")
             print("WhatsApp refuses free-form messages if the merchant hasn't written in the last 24 h.")

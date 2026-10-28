@@ -87,6 +87,9 @@ class Shop(Base):
     summary_skipped_day: Mapped[date | None] = mapped_column(Date)
     # Day whose summary was offered ("tape RÉSUMÉ"): "résumé" shows that day, the scheduler leaves it alone.
     summary_offered_day: Mapped[date | None] = mapped_column(Date)
+    # Business number (phone_number_id) the merchant last wrote to: messages without an incoming one
+    # (evening summary) are sent from it. None: settings.whatsapp_phone_number_id.
+    phone_number_id: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Children are removed by the database (ON DELETE CASCADE), not by the ORM.

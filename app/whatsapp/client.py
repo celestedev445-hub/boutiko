@@ -29,19 +29,22 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {get_settings().whatsapp_access_token}"}
 
 
-def messages_url() -> str:
+def messages_url(phone_number_id: str | None = None) -> str:
+    """Send endpoint of the given business number, or of WHATSAPP_PHONE_NUMBER_ID by default."""
     settings = get_settings()
-    return f"{GRAPH_URL}/{settings.whatsapp_api_version}/{settings.whatsapp_phone_number_id}/messages"
+    sender = phone_number_id or settings.whatsapp_phone_number_id
+    return f"{GRAPH_URL}/{settings.whatsapp_api_version}/{sender}/messages"
 
 
-def send_text(to: str, body: str) -> None:
+def send_text(to: str, body: str, phone_number_id: str | None = None) -> None:
+    """Send from phone_number_id (the number the merchant wrote to), else from the configured number."""
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
         "text": {"body": body},
     }
-    response = httpx.post(messages_url(), json=payload, headers=_headers(), timeout=10)
+    response = httpx.post(messages_url(phone_number_id), json=payload, headers=_headers(), timeout=10)
     if response.is_error:
         raise GraphAPIError.from_response(response)
 
