@@ -113,17 +113,6 @@ def analyze_image(
         reasoning_effort=REASONING_EFFORT,
     )
     try:
-        client = meta_client.get_client()
-        try:
-            response = client.chat.completions.create(**kwargs)
-        except RETRYABLE_ERRORS as exc:
-            logger.warning("%s call failed (%s), retrying once", model, type(exc).__name__)
-            response = client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
-        if not content:
-            raise VisionError("Empty response from the model")
-        return VisionExtraction.model_validate_json(content)
-    except VisionError:
-        raise
+        return meta_client.complete_json(VisionExtraction, retryable=RETRYABLE_ERRORS, **kwargs)
     except (openai.OpenAIError, meta_client.MissingAPIKeyError, ValidationError) as exc:
         raise VisionError(f"{type(exc).__name__}: {exc}") from exc

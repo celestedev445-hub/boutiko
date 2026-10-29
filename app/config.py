@@ -1,7 +1,7 @@
 import re
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     model_vision: str = "muse-spark-1.3-contributor"  # photos: invoices, receipts, products
     model_asr: str = "muse-voice-transcribe-1.0"  # speech-to-text, POST /asr/transcribe
     model_asr_fallback: str = "muse-spark-1.2"  # chat model with audio input, used when ASR fails
+
+    # Fallback provider: Muse Spark Open on Baseten, tried when the Meta Model API fails
+    baseten_api_key: SecretStr | None = None
+    baseten_base_url: str = "https://inference.baseten.co/v1"
+    baseten_model: str = "meta-models/muse-spark-open-1026"  # the -1026 suffix is required
+    ai_fallback_enabled: bool = True
 
     # Evening summary
     summary_enabled: bool = True  # automatic sending; asking for "résumé" always works

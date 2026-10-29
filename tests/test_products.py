@@ -222,7 +222,7 @@ def test_known_products_are_given_to_the_model(client, sent, session_factory, mo
 
 def test_known_products_message_in_the_prompt(monkeypatch):
     calls = []
-    monkeypatch.setattr(meta_client, "create_completion", lambda **kw: calls.append(kw) or SimpleNamespace(
+    monkeypatch.setattr(meta_client, "_meta_completion", lambda retryable, kw: calls.append(kw) or SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content='{"actions": [], "language": "fr"}'))]
     ))
     meta_client.extract_from_text("vendu 3 savons", known_products=["Savon Azur", "Riz"])

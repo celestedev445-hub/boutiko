@@ -91,6 +91,7 @@ All calls go through the Meta Model API with an OpenAI-compatible client (`base_
 | `muse-voice-transcribe-1.0` (`MODEL_ASR`) | Transcribing WhatsApp voice notes (`POST /asr/transcribe`) |
 | `muse-spark-1.2` (`MODEL_ASR_FALLBACK`) | Fallback transcription, chat completion with an audio input |
 | `sam-3.1` | Planned: segmenting and counting products on a shelf photo |
+| Muse Spark Open (via Baseten, hackathon credits) — fallback provider | `meta-models/muse-spark-open-1026` (`BASETEN_MODEL`): same extraction, photo, evening summary and translation requests when the Meta Model API fails (network error, timeout, 429, 5xx, invalid JSON). Needs `BASETEN_API_KEY`; off with `AI_FALLBACK_ENABLED=false`. Not used for voice. See [`app/baseten_client.py`](app/baseten_client.py) and `python scripts/check_baseten.py` |
 
 The extraction output is validated against a Pydantic schema ([`app/schemas.py`](app/schemas.py)): a list of actions, each with `action`, `product`, `quantity`, `unit`, `price` (unit price), `total_price` (line total) and `customer`, plus the detected `language` (a free ISO 639 code), its English `language_name`, and an `intent` for messages that aren't operations.
 

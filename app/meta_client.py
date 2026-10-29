@@ -7,16 +7,24 @@ reasons; "none" is rejected with a 400, so we use "low").
 Voice notes are transcribed in app/services/transcribe.py and photos are
 read in app/services/vision.py.
 
+Fallback: when the Meta API fails (network error, timeout, 429, 5xx) or its
+JSON doesn't validate, the same request goes to Muse Spark Open on Baseten
+(app/baseten_client.py), if BASETEN_API_KEY is set and AI_FALLBACK_ENABLED.
+Voice transcription has no fallback.
+
 TODO: still unverified — the SAM endpoint.
 """
 
 import logging
 from functools import lru_cache
+from types import SimpleNamespace
+from typing import TypeVar
 
 import openai
 from openai import OpenAI
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from app import baseten_client
 from app.config import get_settings
 from app.schemas import Extraction, strict_json_schema
 
@@ -29,6 +37,10 @@ TIMEOUT_SECONDS = 60
 REASONING_EFFORT = "low"
 # Retried once: network errors (timeouts included) and 5xx.
 RETRYABLE_ERRORS = (openai.APIConnectionError, openai.InternalServerError)
+# After these, the same request goes to Baseten (APITimeoutError is an APIConnectionError).
+FALLBACK_ERRORS = (openai.APIConnectionError, openai.InternalServerError, openai.RateLimitError)
+
+T = TypeVar("T", bound=BaseModel)
 
 EXTRACTION_PROMPT = """You help small shopkeepers keep their books, first in Cameroon, now anywhere.
 The merchant may write in ANY language: French, English, Cameroonian Pidgin,
@@ -134,19 +146,56 @@ def extraction_response_format() -> dict:
     }
 
 
-def create_completion(**kwargs):
-    """chat.completions.create, retried once on network errors and 5xx."""
+def _meta_completion(retryable: tuple, kwargs: dict):
+    """chat.completions.create on the Meta API, retried once on `retryable` errors."""
     client = get_client()
     try:
         return client.chat.completions.create(**kwargs)
-    except RETRYABLE_ERRORS as exc:
+    except retryable as exc:
         logger.warning("Meta API call failed (%s), retrying once", type(exc).__name__)
     return client.chat.completions.create(**kwargs)
 
 
+def _from_baseten(kwargs: dict, meta_error: Exception, parse=lambda content: content):
+    """The same request on Baseten; meta_error is raised again if it can't answer either."""
+    if not baseten_client.is_configured():
+        raise meta_error
+    logger.warning("Meta API failed (%s), trying Baseten", type(meta_error).__name__)
+    try:
+        result = parse(baseten_client.complete(kwargs["messages"], kwargs.get("response_format")))
+    except (baseten_client.BasetenError, ValidationError) as exc:
+        logger.warning("Baseten failed too (%s)", type(exc).__name__)
+        raise meta_error from exc
+    logger.info("AI answer from baseten (%s)", get_settings().baseten_model)
+    return result
+
+
+def create_completion(retryable: tuple = RETRYABLE_ERRORS, **kwargs):
+    """chat.completions.create, retried once on network errors and 5xx, then sent to Baseten."""
+    try:
+        response = _meta_completion(retryable, kwargs)
+    except FALLBACK_ERRORS as exc:
+        content = _from_baseten(kwargs, exc)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+    logger.info("AI answer from meta (%s)", kwargs.get("model"))
+    return response
+
+
+def complete_json(output: type[T], retryable: tuple = RETRYABLE_ERRORS, **kwargs) -> T:
+    """The answer validated as `output`: Meta first, Baseten if Meta fails or its JSON is invalid."""
+    try:
+        response = _meta_completion(retryable, kwargs)
+        result = output.model_validate_json(response.choices[0].message.content or "")
+    except (*FALLBACK_ERRORS, ValidationError) as exc:
+        return _from_baseten(kwargs, exc, output.model_validate_json)
+    logger.info("AI answer from meta (%s)", kwargs.get("model"))
+    return result
+
+
 def _extract(user_content, known_products: list[str] | None = None) -> Extraction:
     try:
-        response = create_completion(
+        return complete_json(
+            Extraction,
             model=get_settings().model_text,
             messages=[
                 {"role": "system", "content": EXTRACTION_PROMPT},
@@ -156,12 +205,6 @@ def _extract(user_content, known_products: list[str] | None = None) -> Extractio
             response_format=extraction_response_format(),
             reasoning_effort=REASONING_EFFORT,
         )
-        content = response.choices[0].message.content
-        if not content:
-            raise ExtractionError("Empty response from the model")
-        return Extraction.model_validate_json(content)
-    except ExtractionError:
-        raise
     except (openai.OpenAIError, MissingAPIKeyError, ValidationError) as exc:
         raise ExtractionError(f"{type(exc).__name__}: {exc}") from exc
 
