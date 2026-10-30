@@ -8,7 +8,7 @@ Built for the Meta Global AI Developer Hackathon — Indie track, theme *Build f
 
 - **Website:** [boutiko.avexsolution.com](https://boutiko.avexsolution.com)
 - **WhatsApp:** [+237 6 22 51 09 67](https://wa.me/237622510967) — send any message (for example *"good evening"*) and your shop is created, no sign-up.
-- **Demo video:** [demo/boutiko_demo.mp4](demo/boutiko_demo.mp4) (2 min 19)
+- **Demo video:** [youtube.com/watch?v=e5HVfSKdiCQ](https://www.youtube.com/watch?v=e5HVfSKdiCQ) (2 min 19)
 
 ## The problem
 
@@ -141,7 +141,7 @@ sequenceDiagram
 [`tests/data/phrases.json`](tests/data/phrases.json) holds 48 realistic shop messages (13 French, 10 English, 10 Pidgin, and 15 in Spanish, Portuguese, Arabic, Swahili, Hausa, Lingala and Chinese: unit prices, totals, credit, repayments, stock counts, several actions in one message) with the expected extraction. [`scripts/eval_extraction.py`](scripts/eval_extraction.py) sends each one to the real API and prints OK/KO per phrase and the overall score:
 
 ```bash
-python scripts/eval_extraction.py              # all 33 phrases
+python scripts/eval_extraction.py              # all 48 phrases
 python scripts/eval_extraction.py --lang pcm   # only Pidgin
 python scripts/eval_extraction.py --lang sw --lang zh   # Swahili and Chinese
 python scripts/eval_extraction.py --id 10 -v   # one phrase, with the model output
@@ -521,3 +521,7 @@ Working today: **text messages, voice notes and photos** (Meta speech-to-text wi
 ## Security
 
 No secrets live in this repository. All keys are read from environment variables (`.env`, git-ignored). If you fork this project, keep it that way.
+
+## License
+
+[MIT](LICENSE) © 2026 TALLA FOSSI FLORENT MARTIAL
