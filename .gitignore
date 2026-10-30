@@ -37,3 +37,6 @@ tests/data/voice/*
 # Photos for scripts/eval_vision.py (personal data, keep local)
 tests/data/vision/*
 !tests/data/vision/README.md
+
+# Video editing workspace (sources, voice-over, build) — local only
+video/

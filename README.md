@@ -4,6 +4,12 @@
 
 Built for the Meta Global AI Developer Hackathon — Indie track, theme *Build for Your World*.
 
+## Try it now
+
+- **Website:** [boutiko.avexsolution.com](https://boutiko.avexsolution.com)
+- **WhatsApp:** [+237 6 22 51 09 67](https://wa.me/237622510967) — send any message (for example *"good evening"*) and your shop is created, no sign-up.
+- **Demo video:** [demo/boutiko_demo.mp4](demo/boutiko_demo.mp4) (2 min 19)
+
 ## The problem
 
 Cameroon's neighbourhood shops — the *boutiques*, *tournedos* and market stalls — run on memory, a school notebook and trust. The owner knows roughly what's left on the shelf, roughly what came in this week, and that "Maman Brigitte owes something for the sugar". Nobody has time for a spreadsheet or a dedicated app, and many owners are more comfortable speaking than typing.
